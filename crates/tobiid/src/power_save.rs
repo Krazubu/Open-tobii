@@ -134,8 +134,10 @@ pub(crate) fn release(state: &Mutex<State>, client: u64) {
 /// the stop timeout, which the unit leaves to the service manager (45 s on
 /// the host it was measured on). A stop that has to wait another power-save
 /// request out can take far longer — that request's own budget is 56 s (see
-/// [`deadline::worst::POWER_SAVE`]) — but only against a device that is not
-/// answering, where nothing would end power save in any case.
+/// [`deadline::worst::POWER_SAVE`]) — but only where the device keeps
+/// missing its 6 s deadline, and a stop the manager cuts off there leaves
+/// power save wherever the tracker last took it, as a daemon killed outright
+/// does.
 ///
 /// Whether anybody holds it is read under `power_save_lock` and never ahead
 /// of it (see [`end_held`]), unlike in [`release`], whose client has no
