@@ -935,12 +935,14 @@ pub(crate) fn lock_state(state: &Mutex<State>) -> MutexGuard<'_, State> {
     state.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// How often a request waiting for `pause_lock` or `catalogue_lock` tries
-/// it.
+/// How often a request waiting for one of the locks [`lock_until`] guards
+/// tries it.
 const LOCK_POLL: Duration = Duration::from_millis(10);
 
 /// `lock`, one of the locks a request holds across its device commands
-/// (`pause_lock`, `catalogue_lock`), waiting until `deadline` at most.
+/// (`power_save_lock`, `pause_lock`, `catalogue_lock`), waiting until
+/// `deadline` at most. The lock is tried before it is ever waited on, so a
+/// caller with nothing to wait for pays nothing for asking.
 pub(crate) fn lock_until(lock: &Mutex<()>, deadline: Instant) -> Option<MutexGuard<'_, ()>> {
     loop {
         match lock.try_lock() {
