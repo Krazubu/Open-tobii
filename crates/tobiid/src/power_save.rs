@@ -131,7 +131,11 @@ pub(crate) fn release(state: &Mutex<State>, client: u64) {
 /// on the tracker (probe 2026-10-28): the 3010 went out 45-129 ms after the
 /// signal, within one poll of it, and was answered in 8-22 ms of its 6 s
 /// deadline, so the daemon was gone 71-171 ms after the signal — far inside
-/// the 45 s the shipped unit allows a stop.
+/// the stop timeout, which the unit leaves to the service manager (45 s on
+/// the host it was measured on). A stop that has to wait another power-save
+/// request out can take far longer — that request's own budget is 56 s (see
+/// [`deadline::worst::POWER_SAVE`]) — but only against a device that is not
+/// answering, where nothing would end power save in any case.
 ///
 /// Whether anybody holds it is read under `power_save_lock` and never ahead
 /// of it (see [`end_held`]), unlike in [`release`], whose client has no
