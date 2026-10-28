@@ -126,10 +126,14 @@ pub(crate) fn release(state: &Mutex<State>, client: u64) {
 /// it. The DLL, whose process ending sends nothing, leaves it on; the daemon
 /// keeps its promise that power save ends with its holder instead. Only a
 /// daemon killed outright still leaves it on.
+///
+/// Whether anybody holds it is read under `power_save_lock` and never ahead
+/// of it (see [`end_held`]), unlike in [`release`], whose client has no
+/// request left to run: a request entering power save holds that lock across
+/// its 3000 and records itself the holder only once the tracker has
+/// answered, so a stop that looked first would find no holder and leave the
+/// tracker in the power save that 3000 was just beginning.
 pub(crate) fn end_at_shutdown(state: &Mutex<State>) {
-    if lock_state(state).power_save_holder.is_none() {
-        return;
-    }
     end_held(state, None, "the daemon is stopping");
 }
 
@@ -145,11 +149,13 @@ fn end_held(state: &Mutex<State>, holder: Option<u64>, why: &'static str) {
         // Another request has held the lock all this while, stuck on the
         // device; a 3010 now could cross it. The holder is let go, though
         // nothing ends power save.
+        let mut st = lock_state(state);
         warn!(
             ?holder,
-            why, "could not end power save in time, so it may stay on"
+            held_by = ?st.power_save_holder,
+            why,
+            "could not end power save in time, so it may stay on"
         );
-        let mut st = lock_state(state);
         if held(&st) {
             st.power_save_holder = None;
         }
@@ -186,6 +192,9 @@ fn end_held(state: &Mutex<State>, holder: Option<u64>, why: &'static str) {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::mpsc;
+    use std::thread;
+
     use super::*;
     use crate::daemon::tests::state_with_client;
     use crate::device::DeviceCommands;
@@ -194,11 +203,21 @@ mod tests {
     use tobii_proto::protocol::ttp_error;
     use tobii_usb::engine::{CommandError, CommandResponse, Sample};
 
-    /// Records every command and answers each with `answer`.
+    /// Records every command and answers each with `answer`. A `gate` set
+    /// before a command makes `run` stop in it, so a test can hold a request
+    /// on the device while another thread runs.
     struct Recording {
         sent: Mutex<Vec<(u32, Vec<u8>)>>,
         deadlines: Mutex<Vec<Duration>>,
         answer: Mutex<Result<CommandResponse, CommandError>>,
+        gate: Mutex<Option<Gate>>,
+    }
+
+    /// Where a command waits: `run` announces itself on `entered`, then
+    /// waits for `release`. It holds one command, the first to arrive.
+    struct Gate {
+        entered: mpsc::Sender<()>,
+        release: mpsc::Receiver<()>,
     }
 
     impl DeviceCommands for Recording {
@@ -210,6 +229,12 @@ mod tests {
         ) -> Result<CommandResponse, CommandError> {
             self.sent.lock().expect("sent").push((cmd, payload));
             self.deadlines.lock().expect("deadlines").push(timeout);
+            // Taken out of its lock, so the wait below holds nothing.
+            let gate = self.gate.lock().expect("gate").take();
+            if let Some(gate) = gate {
+                let _ = gate.entered.send(());
+                let _ = gate.release.recv();
+            }
             self.answer.lock().expect("answer").clone()
         }
     }
@@ -226,6 +251,7 @@ mod tests {
             sent: Mutex::new(Vec::new()),
             deadlines: Mutex::new(Vec::new()),
             answer: Mutex::new(Ok(CommandResponse::ok(Vec::new()))),
+            gate: Mutex::new(None),
         });
         let mut st = state_with_client(1);
         st.clients.append(&mut state_with_client(2).clients);
@@ -375,6 +401,54 @@ mod tests {
         sent(&s);
         end_at_shutdown(&s.state);
         assert!(sent(&s).is_empty());
+    }
+
+    #[test]
+    fn a_stopping_daemon_waits_for_a_request_that_is_entering_power_save() {
+        let s = Arc::new(setup());
+        lock_state(&s.state).facts = Some(facts_saying("true"));
+        let (entered, reached_device) = mpsc::channel();
+        let (release, held_there) = mpsc::channel();
+        *s.device.gate.lock().expect("gate") = Some(Gate {
+            entered,
+            release: held_there,
+        });
+
+        // A client enters power save and its 3000 stops on the device, so
+        // `power_save_lock` is held and the holder is not recorded yet.
+        let asking = {
+            let s = Arc::clone(&s);
+            thread::spawn(move || ask(&s, 1, &[1]))
+        };
+        reached_device
+            .recv_timeout(LOCK_TIMEOUT)
+            .expect("the 3000 reaches the device");
+        assert_eq!(holder(&s), None, "recorded only once the tracker answers");
+
+        // The daemon stops while that 3000 is in flight. It may not read the
+        // holder past the lock: there is none to find yet, and returning here
+        // would leave the tracker in the power save the 3000 is beginning.
+        let (done, stopped) = mpsc::channel();
+        let stopping = {
+            let s = Arc::clone(&s);
+            thread::spawn(move || {
+                end_at_shutdown(&s.state);
+                let _ = done.send(());
+            })
+        };
+        assert!(
+            stopped.recv_timeout(LOCK_TIMEOUT / 3).is_err(),
+            "the stop waited for no power-save request still on the device"
+        );
+
+        // The 3000 is answered; the stop then finds the holder it recorded.
+        release.send(()).expect("release the device");
+        assert_eq!(asking.join().expect("the request"), Reply::ok(Vec::new()));
+        stopping.join().expect("the stop");
+
+        assert_eq!(sent(&s), [(3000, Vec::new()), (3010, Vec::new())]);
+        assert_eq!(holder(&s), None);
+        assert_eq!(power_save_in_facts(&s).as_deref(), Some("false"));
     }
 
     #[test]
