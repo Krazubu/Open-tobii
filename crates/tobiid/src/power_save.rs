@@ -436,6 +436,10 @@ mod tests {
                 let _ = done.send(());
             })
         };
+        // Not finishing is weaker than it reads, since a thread yet to be
+        // scheduled looks the same; what pins the behaviour is the pair of
+        // assertions after the release, which no 3010 ever reaches without
+        // the wait.
         assert!(
             stopped.recv_timeout(LOCK_TIMEOUT / 3).is_err(),
             "the stop waited for no power-save request still on the device"
