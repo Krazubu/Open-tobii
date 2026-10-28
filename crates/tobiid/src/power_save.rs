@@ -27,7 +27,9 @@
 //! power save a client holds, as the client's departure would (see
 //! [`end_at_shutdown`]), where the DLL's process ending sends nothing and
 //! leaves it on; only a daemon killed outright leaves the tracker in power
-//! save with nobody holding it.
+//! save with nobody holding it (probe 2026-10-28: a SIGTERM, a restart and
+//! a SIGINT each left a fresh daemon's 1490 reading power save off, where a
+//! SIGKILL control left it on).
 //!
 //! Requests hold `power_save_lock` from before the command to the holder's
 //! update, so the device and the holder agree; the state lock is taken only
@@ -125,7 +127,11 @@ pub(crate) fn release(state: &Mutex<State>, client: u64) {
 /// stopped without this would leave the tracker in it with nobody holding
 /// it. The DLL, whose process ending sends nothing, leaves it on; the daemon
 /// keeps its promise that power save ends with its holder instead. Only a
-/// daemon killed outright still leaves it on.
+/// daemon killed outright still leaves it on. What it costs a stop, measured
+/// on the tracker (probe 2026-10-28): the 3010 went out 45-129 ms after the
+/// signal, within one poll of it, and was answered in 8-22 ms of its 6 s
+/// deadline, so the daemon was gone 71-171 ms after the signal — far inside
+/// the 45 s the shipped unit allows a stop.
 ///
 /// Whether anybody holds it is read under `power_save_lock` and never ahead
 /// of it (see [`end_held`]), unlike in [`release`], whose client has no
