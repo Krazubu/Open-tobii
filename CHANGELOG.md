@@ -30,6 +30,13 @@ had, and for those 4.25 added in the 0.3.0 entry below and the README's
   looking at the left and right edges reads about 0.08 and 0.92, on a 49"
   32:9 one about −0.44 and 1.44.
 
+### Changed
+
+- The installers' hints (the packages', `install.sh`'s and the AUR
+  recipe's) ask each user who wants gaze on the screen to calibrate, and
+  say who does not need to. A release's page now carries its section of
+  this changelog and the same note, not only a compare link.
+
 ## 0.4.1 — 2026-10-28
 
 ### Fixed

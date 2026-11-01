@@ -1,6 +1,7 @@
 # The release packages: on a v* tag, built (`make package`, in the container
-# of packaging/Containerfile) and published as that tag's GitHub release; run
-# by hand, built and kept as the run's artifacts.
+# of packaging/Containerfile) and published as that tag's GitHub release, its
+# text the version's section of CHANGELOG.md; run by hand, built and kept as
+# the run's artifacts.
 #
 # Two jobs, because the build runs code from many crates' build scripts and
 # the onnxruntime it downloads: its job may only read the repository, and the
@@ -34,6 +35,34 @@ jobs:
             exit 1
           fi
 
+      # The release's text: the version's section of CHANGELOG.md, then what
+      # a new install takes, which nothing else on the release page says.
+      # Before the build, so that a version with no section fails early.
+      - name: The changelog has the version
+        if: github.ref_type == 'tag'
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          mkdir notes
+          awk -v v="$version" '
+            /^## / { if (found) exit; if ($2 == v) { found = 1; next } }
+            found { print }
+          ' CHANGELOG.md > notes/body.md
+          if ! grep -q '[^[:space:]]' notes/body.md; then
+            echo "::error::CHANGELOG.md has no section for $version"
+            exit 1
+          fi
+          cat >> notes/body.md << EOF
+
+          ### Installing
+
+          Pick the package for your system below (INSTALL.md §0 has the
+          table), then, as each user who wants gaze on the screen (games,
+          applications, gaze-switcher), calibrate once: "Tobii Calibration"
+          among the applications, or \`tobii-calibrate\`
+          ([INSTALL.md §8a](https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_REF_NAME/INSTALL.md#8a-calibration)).
+          Head pose does not need it.
+          EOF
+
       - name: Build the packages
         run: make package CONTAINER=docker
 
@@ -42,6 +71,14 @@ jobs:
         with:
           name: tobii-linux-packages
           path: dist/
+          if-no-files-found: error
+
+      - name: Keep the release's text
+        if: github.ref_type == 'tag'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: tobii-linux-notes
+          path: notes/
           if-no-files-found: error
 
   publish:
@@ -57,10 +94,17 @@ jobs:
           name: tobii-linux-packages
           path: dist/
 
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: tobii-linux-notes
+          path: notes/
+
+      # The generated notes (the compare link) follow the changelog's.
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: >
           gh release create "$GITHUB_REF_NAME" dist/*
-          --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes
+          --repo "$GITHUB_REPOSITORY" --verify-tag
+          --notes-file notes/body.md --generate-notes
           --title "tobii-linux ${GITHUB_REF_NAME#v}"

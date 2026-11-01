@@ -222,6 +222,10 @@ tobii-linux $VERSION installed under /usr/local.
   - tobiid starts on demand from your next login, or now after
       systemctl --user start tobiid.socket
     ("Tobii Calibration" starts it by itself either way);
+  - calibrate, once for each user who wants gaze on the screen (games,
+    applications, gaze-switcher; head pose does not need it): "Tobii
+    Calibration" among the applications, or  tobii-calibrate
+    (calibrated before 0.4.1, or with --no-display-setup? calibrate again);
   - gaze to arrow keys: join the input group, which lets every program you
     run read all keyboards (INSTALL.md §3), and reboot,
       sudo usermod -aG input "\$USER"
