@@ -19,6 +19,7 @@ depends=('libusb' 'systemd-libs' 'gcc-libs')
 # tobii-calibrate opens a window; it talks Wayland or X11 through winit.
 optdepends=(
   'opentrack: head pose as a tracker input over UDP 4242'
+  'libnotify: the reminder to calibrate, with its buttons'
   'wayland: tobii-calibrate on a Wayland session'
   'libxkbcommon: tobii-calibrate on an X11 session'
 )
@@ -66,6 +67,15 @@ package() {
     "${pkgdir}/usr/share/applications/tobii-calibrate.desktop"
   install -Dm644 "${src}/usr/local/share/icons/hicolor/scalable/apps/tobii-calibrate.svg" \
     "${pkgdir}/usr/share/icons/hicolor/scalable/apps/tobii-calibrate.svg"
+
+  # The reminder to calibrate, at every user's login; the tarballs after
+  # 0.4.1 carry it.
+  local remind="${src}/etc/xdg/autostart/tobii-calibrate-remind.desktop"
+  if [ -f "${remind}" ]; then
+    install -Dm644 "${remind}" "${pkgdir}/etc/xdg/autostart/tobii-calibrate-remind.desktop"
+    sed -i 's|/usr/local/bin/|/usr/bin/|g' \
+      "${pkgdir}/etc/xdg/autostart/tobii-calibrate-remind.desktop"
+  fi
 
   install -Dm644 -t "${pkgdir}/usr/share/doc/${_pkgname}" \
     "${src}/usr/local/share/doc/${_pkgname}/README.md" \

@@ -32,7 +32,7 @@ tobii-calibrate                               # calibrate once; it starts the da
 Calibrating is once per user, and it is what puts gaze where you look:
 games and applications reading gaze through `libtobii.so` need it, and so
 does gaze-switcher. Head pose (OpenTrack) and `tobii-gaze-keys`' arrows work
-without it.
+without it. Until you calibrate, a notification at login offers it.
 
 Gaze to arrow keys and head pose to OpenTrack are opt-in, one `systemctl
 --user enable` each — [INSTALL.md §3](INSTALL.md) says what each one needs

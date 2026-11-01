@@ -53,8 +53,9 @@ After installing:
   starts one itself anyway;
 - calibrate (§8a), once for each user who wants gaze on the screen (games,
   applications, gaze-switcher; head pose does not need it): "Tobii
-  Calibration" among the applications, or `tobii-calibrate`. Calibrated
-  before 0.4.1, or with `--no-display-setup`? Calibrate again;
+  Calibration" among the applications, or `tobii-calibrate`; until then a
+  notification at login offers it. Calibrated before 0.4.1, or with
+  `--no-display-setup`? Calibrate again;
 - gaze to arrow keys (§8): join the `input` group, which lets every program
   you run read all keyboards (§3 weighs it), with
   `sudo usermod -aG input "$USER"`, reboot, then
@@ -957,6 +958,22 @@ whether the daemon still saves the calibration (the save was under way;
   calibrate again with the display setup; calibrate again because the
   display area changed since). It reads the files tobiid reads, so it
   starts no daemon and opens no tracker.
+- `--remind` is what the desktop runs at every login
+  (`/etc/xdg/autostart/tobii-calibrate-remind.desktop`). With the tracker
+  plugged in and no calibration of yours, or one but no display area saved
+  (made with `--no-display-setup`, or before 0.4.1), it waits 20 s for the
+  desktop and then shows a notification, in English or Russian as the
+  locale says: *Calibrate* (or a click on the notification) starts the
+  calibration, *Don't remind me* stops the reminders for good. Each of the
+  two reasons comes at most three times: at the first login, a day later,
+  a week after that. It needs `notify-send` with buttons (libnotify 0.7.10
+  or later, `libnotify-bin` on Debian and Ubuntu); an older one, or
+  `busctl` without it, shows the text without buttons. It stays quiet in a
+  greeter's or other non-user session, and while `TOBII_CALIBRATION` is
+  set. What it has shown is kept in `~/.config/tobii/reminders`: delete the
+  file to be reminded again. To turn it off for one user without the button,
+  give them a copy with `Hidden=true` in `~/.config/autostart/`; for every
+  user, delete the system file (a package upgrade may bring it back).
 - `--rounds 1` for a quick 7-point pass (half the tracker's 14 stored points
   stay from the previous calibration); `--dwell-ms` to linger longer per point.
 - `--reset` goes back to the built-in calibration; or delete the file, or set

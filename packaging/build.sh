@@ -40,7 +40,8 @@ rm -rf "$STAGE" "$DIST"
 make stage DESTDIR="$STAGE/pkg" PREFIX=/usr UDEVDIR=/usr/lib/udev/rules.d THIRD_PARTY="$THIRD_PARTY"
 make stage DESTDIR="$STAGE/tar/$TARDIR/files" PREFIX=/usr/local UDEVDIR=/etc/udev/rules.d \
 	THIRD_PARTY="$THIRD_PARTY"
-desktop-file-validate "$STAGE/pkg/usr/share/applications/tobii-calibrate.desktop"
+desktop-file-validate "$STAGE/pkg/usr/share/applications/tobii-calibrate.desktop" \
+	"$STAGE/pkg/etc/xdg/autostart/tobii-calibrate-remind.desktop"
 
 # Debian wants a copyright file, and a minimized Ubuntu keeps nothing else
 # under /usr/share/doc: every licence and notice, in one file, for the .deb.

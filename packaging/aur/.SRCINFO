@@ -11,6 +11,7 @@ pkgbase = tobii-linux-bin
 	depends = systemd-libs
 	depends = gcc-libs
 	optdepends = opentrack: head pose as a tracker input over UDP 4242
+	optdepends = libnotify: the reminder to calibrate, with its buttons
 	optdepends = wayland: tobii-calibrate on a Wayland session
 	optdepends = libxkbcommon: tobii-calibrate on an X11 session
 	provides = tobii-linux

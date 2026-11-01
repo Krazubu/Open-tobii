@@ -18,6 +18,9 @@ use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::keyboard::{Key, NamedKey};
 use winit::monitor::MonitorHandle;
+use winit::platform::startup_notify::{
+    EventLoopExtStartupNotify, WindowAttributesExtStartupNotify,
+};
 use winit::platform::wayland::WindowAttributesExtWayland;
 use winit::window::{Fullscreen, Window, WindowId};
 
@@ -1144,6 +1147,12 @@ impl ApplicationHandler<UiEvent> for Ui {
         let mut attributes = Window::default_attributes()
             .with_title("tobii-calibrate")
             .with_name(APP_ID, APP_ID);
+        // Started from the reminder's button (or a launcher that hands one
+        // over), the window takes the focus with the token it was given:
+        // the keys must reach it, not the window the user was in.
+        if let Some(token) = event_loop.read_token_from_env() {
+            attributes = attributes.with_activation_token(token);
+        }
         if self.windowed {
             attributes = attributes.with_inner_size(LogicalSize::new(1280.0, 800.0));
         } else {

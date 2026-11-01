@@ -32,6 +32,16 @@ had, and for those 4.25 added in the 0.3.0 entry below and the README's
 
 ### Added
 
+- **A reminder to calibrate.** At login, `tobii-calibrate --remind` (an
+  autostart entry, `/etc/xdg/autostart/tobii-calibrate-remind.desktop`)
+  checks whether the tracker is plugged in and runs on the built-in
+  calibration, or on the user's calibration but no saved display area; if
+  so, a notification offers to calibrate, with *Calibrate* and *Don't remind
+  me* buttons, in English or Russian. Each reason comes at most three
+  times — at the first login, a day later, a week after that — and the
+  calibration's window takes the focus from the button where the
+  notification server hands over a token. The packages recommend
+  `notify-send` for the buttons; without them the notification is text.
 - **`tobii-calibrate` opens on the tracker's monitor more often, and Tab
   moves it.** Without `--monitor` it took the primary monitor, which Wayland
   does not name to programs, so it opened on the first monitor listed. It

@@ -5,7 +5,8 @@ tobii-linux is installed. Plug the tracker in, then:
   tobii-calibrate            calibrate once, as each user who wants gaze on
                              the screen (games, applications, gaze-switcher;
                              head pose does not need it); it starts the
-                             daemon itself
+                             daemon itself, and a notification offers it at
+                             login until then
 
 Opt-in, each one `systemctl --user enable --now`:
   tobii-gaze-keys.service    gaze to arrow keys -- needs the `input` group,

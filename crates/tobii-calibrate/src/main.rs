@@ -20,6 +20,7 @@ mod draw;
 mod edid;
 mod ipc;
 mod remembered;
+mod remind;
 mod sequence;
 mod setup;
 mod status;
@@ -57,6 +58,10 @@ usage: tobii-calibrate [options]
   --reset            go back to the driver's built-in calibration and exit
   --status           say what the tracker runs on (your calibration and
                      display area, or the built-in ones) and exit
+  --remind           what the desktop runs at login: with the tracker
+                     plugged in and no calibration or display area of
+                     yours, a notification offers to calibrate (three
+                     times at most; \"Don't remind me\" stops it)
   --dry-run          run the screens without a tracker
   --windowed         a 1280x800 window instead of fullscreen
 
@@ -72,6 +77,7 @@ struct Options {
     export: Option<String>,
     reset: bool,
     status: bool,
+    remind: bool,
     dry_run: bool,
     windowed: bool,
     display_setup: bool,
@@ -87,6 +93,7 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Options> {
         export: None,
         reset: false,
         status: false,
+        remind: false,
         dry_run: false,
         windowed: false,
         display_setup: true,
@@ -116,6 +123,7 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Options> {
             "--export" => o.export = Some(value("--export")?),
             "--reset" => o.reset = true,
             "--status" => o.status = true,
+            "--remind" => o.remind = true,
             "--dry-run" => o.dry_run = true,
             "--windowed" => o.windowed = true,
             "--no-display-setup" => o.display_setup = false,
@@ -323,8 +331,15 @@ fn window_failure(
 fn run() -> Result<()> {
     let o = parse_args(std::env::args().skip(1))?;
     if o.status {
-        print!("{}", status::Status::read().report());
+        print!(
+            "{}{}",
+            status::Status::read().report(),
+            remind::report_line()
+        );
         return Ok(());
+    }
+    if o.remind {
+        return remind::run();
     }
     if o.reset {
         return reset();
@@ -479,6 +494,7 @@ mod tests {
         );
         assert!(parse(&[]).expect("defaults").display_setup);
         assert!(parse(&["--status"]).expect("status").status);
+        assert!(parse(&["--remind"]).expect("remind").remind);
         assert_eq!(
             parse(&["--monitor", "DP-2"]).expect("name").monitor,
             MonitorChoice::Name("DP-2".into())

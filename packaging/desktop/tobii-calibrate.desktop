@@ -11,6 +11,7 @@ Icon=tobii-calibrate
 Terminal=false
 StartupNotify=false
 StartupWMClass=tobii-calibrate
+X-GNOME-UsesNotifications=true
 Categories=Settings;HardwareSettings;
 Keywords=tobii;eye;tracker;gaze;calibration;
 Keywords[ru]=tobii;глаза;айтрекер;взгляд;калибровка;
