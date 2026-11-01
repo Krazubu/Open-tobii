@@ -12,6 +12,7 @@
 pub mod wire;
 pub mod server;
 pub mod translate;
+pub mod run;
 
 #[cfg(windows)]
 #[path = "transport_windows.rs"]

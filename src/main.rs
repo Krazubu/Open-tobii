@@ -92,6 +92,10 @@ fn main() {
         ttp_probe();
         return;
     }
+    if std::env::args().any(|a| a == "--prp") {
+        prp_server();
+        return;
+    }
     let mut dir = None;
     let mut name_override = None;
     let mut args = std::env::args().skip(1);
@@ -148,6 +152,58 @@ fn main() {
             }
             Err(e) => {
                 log!("accept failed: {e}");
+                thread::sleep(Duration::from_millis(200));
+            }
+        }
+    }
+}
+
+/// `ttpbridge --prp`: serve the tracker to Pro SDK 2.0 / Eye Tracker Manager
+/// 2.7.2 by translating PRP to TTP. Windows-only for now (macOS PRP transport
+/// is not reversed); the device-facing TTP half runs on any platform.
+fn prp_server() {
+    let usb = match open_device() {
+        Ok(h) => Arc::new(h),
+        Err(e) => {
+            log!("cannot open {VID:04x}:{PID:04x}: {e}");
+            std::process::exit(1);
+        }
+    };
+    let serial = serial_number(&usb).unwrap_or_else(|| "UNKNOWN".into());
+    log!("device serial {serial}");
+
+    let session = match ttp::session::Session::open(usb, &ttp::session::builtin_init_packets()) {
+        Ok(s) => Arc::new(s),
+        Err(e) => {
+            log!("TTP session open failed: {e}");
+            std::process::exit(1);
+        }
+    };
+    let props = Arc::new(prp::run::Properties::read_from(&session));
+    log!("device ready: '{}', {} Hz", props.device_name, props.output_frequency);
+
+    let listener = match prp::transport::Listener::bind(&serial) {
+        Ok(l) => l,
+        Err(e) => {
+            log!("cannot serve TOBIIPRP-{serial}: {e}");
+            std::process::exit(1);
+        }
+    };
+    log!("listening on {} (clients see tobii-prp://{serial})", listener.describe());
+
+    for n in 0.. {
+        match listener.accept() {
+            Ok(client) => {
+                log!("prp client {n}: connected (pid {:#x})", client.pid);
+                let session = session.clone();
+                let props = props.clone();
+                thread::spawn(move || {
+                    prp::run::serve(session, client, props);
+                    log!("prp client {n}: gone");
+                });
+            }
+            Err(e) => {
+                log!("prp accept failed: {e}");
                 thread::sleep(Duration::from_millis(200));
             }
         }
