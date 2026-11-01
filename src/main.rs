@@ -88,6 +88,10 @@ struct Bridge {
 
 fn main() {
     START.get_or_init(Instant::now);
+    if std::env::args().nth(1).as_deref() == Some("ttp-probe") {
+        ttp_probe();
+        return;
+    }
     let mut dir = None;
     let mut name_override = None;
     let mut args = std::env::args().skip(1);
@@ -148,6 +152,54 @@ fn main() {
             }
         }
     }
+}
+
+/// `ttpbridge ttp-probe`: bring the device up over TTP ourselves (no SDK) and
+/// issue a few read commands, printing what comes back. The local bench for
+/// the PRP translator's device-facing half.
+fn ttp_probe() {
+    let usb = match open_device() {
+        Ok(h) => Arc::new(h),
+        Err(e) => {
+            log!("cannot open {VID:04x}:{PID:04x}: {e}");
+            std::process::exit(1);
+        }
+    };
+    log!("serial {}", serial_number(&usb).unwrap_or_default());
+    let session = match ttp::session::Session::open(usb, &ttp::session::builtin_init_packets()) {
+        Ok(s) => s,
+        Err(e) => {
+            log!("session open failed: {e}");
+            std::process::exit(1);
+        }
+    };
+    log!("session up; init replayed");
+
+    use ttp::protocol::{cmd, parse_message};
+    for (name, command, payload) in [
+        ("DEVICE_STRINGS 1420", cmd::DEVICE_STRINGS, vec![0u8, 0]),
+        ("DISPLAY_AREA_GET 1430", cmd::DISPLAY_AREA_GET, vec![0u8, 0]),
+        ("TRACK_BOX 1400", cmd::TRACK_BOX, vec![0u8, 0]),
+        ("OUTPUT_RATE 1650", cmd::OUTPUT_RATE, vec![0u8, 0]),
+        ("STATUS 1490", cmd::STATUS, vec![0u8, 0]),
+    ] {
+        match session.command(command, &payload) {
+            Ok(bytes) => {
+                let m = parse_message(&bytes);
+                let (err, plen) = m.map(|m| (m.error, m.payload.len())).unwrap_or((0, 0));
+                let body = m.map(|m| m.payload).unwrap_or(&[]);
+                let strings: Vec<String> = body
+                    .split(|&b| b == 0)
+                    .filter(|s| s.len() >= 3 && s.iter().all(|&c| (0x20..0x7f).contains(&c)))
+                    .map(|s| String::from_utf8_lossy(s).into_owned())
+                    .collect();
+                log!("{name}: error {err:#x}, {plen} B payload{}", if strings.is_empty() { String::new() } else { format!(", strings {strings:?}") });
+            }
+            Err(e) => log!("{name}: {e}"),
+        }
+    }
+    thread::sleep(Duration::from_millis(200));
+    log!("inbox (streams/notifications so far): {}", session.drain_inbox().len());
 }
 
 fn open_device() -> rusb::Result<DeviceHandle<GlobalContext>> {
