@@ -6,13 +6,23 @@
 //! calibration and licence forwarding are not here yet; their requests are
 //! acknowledged so the client is not left waiting.
 
-use super::translate::{self, prop, PropValue};
+use super::translate::{self, prop, EyeGaze, PropValue};
 use super::transport::PrpClient;
 use super::wire::{op, Message};
+use crate::ttp::gaze83::{self, EyeFrame};
 use crate::ttp::session::Session;
-use crate::ttp::{facts, protocol::cmd, protocol::parse_message};
+use crate::ttp::{facts, protocol::cmd, protocol::parse_message, protocol::STREAM_ID_GAZE};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
+
+/// Which streams the client is subscribed to.
+#[derive(Default)]
+struct Subs {
+    gaze: AtomicBool,
+    position: AtomicBool,
+    device_started: AtomicBool,
+}
 
 /// The property values PETM reads, filled from the device at start-up.
 #[derive(Debug, Clone)]
@@ -87,7 +97,48 @@ impl Properties {
 /// subscriptions, commands) and the time sync channel. Blocks until the
 /// command channel closes.
 pub fn serve(session: Arc<Session>, client: PrpClient, props: Arc<Properties>) {
-    let PrpClient { mut command, subscription: _subscription, mut timesync, .. } = client;
+    let PrpClient { mut command, subscription, mut timesync, .. } = client;
+    let subs = Arc::new(Subs::default());
+
+    // Forward device gaze frames to the subscription channel, re-encoded as
+    // the PRP streams the client asked for.
+    if let Some(rx) = session.take_streams() {
+        let subs = subs.clone();
+        std::thread::spawn(move || {
+            let sub = subscription;
+            for msg in rx {
+                let Some(parsed) = parse_message(&msg) else { continue };
+                if parsed.id != STREAM_ID_GAZE {
+                    continue;
+                }
+                let Some(frame) = gaze83::decode_gaze_frame(&parsed) else { continue };
+                if subs.gaze.load(Ordering::Relaxed) {
+                    let g = translate::advanced_gaze(
+                        frame.device_ts_us,
+                        &eye_gaze(&frame.left),
+                        &eye_gaze(&frame.right),
+                        frame.left.tracked,
+                        frame.right.tracked,
+                    );
+                    if sub.write_frame(&g).is_err() {
+                        break;
+                    }
+                }
+                if subs.position.load(Ordering::Relaxed) {
+                    let p = translate::user_position_guide(
+                        frame.device_ts_us,
+                        frame.left.position_guide.valid,
+                        f3(frame.left.position_guide.value),
+                        frame.right.position_guide.valid,
+                        f3(frame.right.position_guide.value),
+                    );
+                    if sub.write_frame(&p).is_err() {
+                        break;
+                    }
+                }
+            }
+        });
+    }
 
     // Time sync on its own thread: answer timestamp requests with a device
     // time. Approximate for now (a monotonic microsecond counter); the real
@@ -129,7 +180,7 @@ pub fn serve(session: Arc<Session>, client: PrpClient, props: Arc<Properties>) {
                 let vals = props.value(property).into_iter().collect::<Vec<_>>();
                 translate::property_enumerate_response(tx, property, &vals)
             }
-            op::COMMAND_REQUEST => handle_command(&session, &props, &req),
+            op::COMMAND_REQUEST => handle_command(&session, &subs, &req),
             other => {
                 eprintln!("prp: unhandled operation {other}");
                 continue;
@@ -151,26 +202,82 @@ fn property_of(req: &Message) -> u32 {
     req.parts.first().and_then(|s| s.word(0)).unwrap_or(0)
 }
 
-fn handle_command(_session: &Session, _props: &Properties, req: &Message) -> Message {
+fn handle_command(session: &Session, subs: &Subs, req: &Message) -> Message {
     let tx = req.transaction;
     let command = cmd_id(req);
+    let arg = property_of_arg(req);
     match command {
         // Connect: return the device's capabilities (templated) and move on.
         // The licence PETM sent is not acted on yet (it is never blanked or
         // forged); forwarding it to the device comes with the calibration
         // work.
         1 => translate::connect_response(tx),
-        // Property notification start: acknowledge the subscription. The
-        // initial value and later changes are pushed on the subscription
-        // channel once stream/notification forwarding lands.
-        5 => translate::command_ok_echo(tx, command, property_of_arg(req)),
-        // Stream and compound-stream start/stop: acknowledge; forwarding the
-        // frames is the next step.
-        3 | 4 | 23 | 24 => translate::command_ok_echo(tx, command, property_of_arg(req)),
+        // Property notification start: acknowledge the subscription. Later
+        // changes (e.g. calibration id) are pushed on the subscription
+        // channel once notification forwarding lands.
+        5 => translate::command_ok_echo(tx, command, arg),
+        // Stream start (3) / stop (4): gaze (stream id 6).
+        3 => {
+            if arg == translate::STREAM_ADVANCED_GAZE {
+                subs.gaze.store(true, Ordering::Relaxed);
+                ensure_device_stream(session, subs);
+            }
+            translate::command_ok_echo(tx, command, arg)
+        }
+        4 => {
+            if arg == translate::STREAM_ADVANCED_GAZE {
+                subs.gaze.store(false, Ordering::Relaxed);
+            }
+            translate::command_ok_echo(tx, command, arg)
+        }
+        // Compound stream start (23) / stop (24): position guide (id 2).
+        23 => {
+            if arg == translate::COMPOUND_USER_POSITION_GUIDE {
+                subs.position.store(true, Ordering::Relaxed);
+                ensure_device_stream(session, subs);
+            }
+            translate::command_ok_echo(tx, command, arg)
+        }
+        24 => {
+            if arg == translate::COMPOUND_USER_POSITION_GUIDE {
+                subs.position.store(false, Ordering::Relaxed);
+            }
+            translate::command_ok_echo(tx, command, arg)
+        }
         // Anything else (calibration, licence retrieve, …): acknowledge for
         // now so the client is not blocked.
         _ => translate::command_ok(tx, command),
     }
+}
+
+/// Start the device's 0x500 gaze stream once; both PRP streams come from it.
+fn ensure_device_stream(session: &Session, subs: &Subs) {
+    if !subs.device_started.swap(true, Ordering::Relaxed) {
+        if let Err(e) = session.start_stream(STREAM_ID_GAZE) {
+            eprintln!("prp: starting the gaze stream failed: {e}");
+            subs.device_started.store(false, Ordering::Relaxed);
+        }
+    }
+}
+
+/// Map a decoded TTP eye to the PRP `ADVANCED_GAZE` eye fields.
+fn eye_gaze(e: &EyeFrame) -> EyeGaze {
+    EyeGaze {
+        origin_valid: e.origin_display_mm.valid,
+        origin_mm: f3(e.origin_display_mm.value),
+        track_box: f3(e.track_box.value),
+        point_valid: e.gaze_point_norm.valid,
+        point_mm: f3(e.gaze_point_tracker_mm.value),
+        point_display: [e.gaze_point_norm.value[0] as f32, e.gaze_point_norm.value[1] as f32],
+        eyeball_valid: e.eyeball_center_mm.valid,
+        eyeball_mm: f3(e.eyeball_center_mm.value),
+        pupil_valid: e.pupil_diameter_mm.valid,
+        pupil_mm: e.pupil_diameter_mm.value as f32,
+    }
+}
+
+fn f3(v: [f64; 3]) -> [f32; 3] {
+    [v[0] as f32, v[1] as f32, v[2] as f32]
 }
 
 /// The single `u32` argument of a command (its second struct's first field).

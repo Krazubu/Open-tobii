@@ -232,6 +232,7 @@ fn ttp_probe() {
     log!("session up; init replayed");
 
     use ttp::protocol::{cmd, parse_message};
+    let streams = session.take_streams();
     for (name, command, payload) in [
         ("DEVICE_STRINGS 1420", cmd::DEVICE_STRINGS, vec![0u8, 0]),
         ("DISPLAY_AREA_GET 1430", cmd::DISPLAY_AREA_GET, vec![0u8, 0]),
@@ -254,8 +255,33 @@ fn ttp_probe() {
             Err(e) => log!("{name}: {e}"),
         }
     }
-    thread::sleep(Duration::from_millis(200));
-    log!("inbox (streams/notifications so far): {}", session.drain_inbox().len());
+    // Start the gaze stream and decode one frame, to confirm the live
+    // TTP->values path the PRP translator relies on.
+    let _ = session.start_stream(ttp::protocol::STREAM_ID_GAZE);
+    thread::sleep(Duration::from_millis(400));
+    let mut count = 0;
+    let mut shown = false;
+    if let Some(rx) = streams {
+        while let Ok(msg) = rx.try_recv() {
+            count += 1;
+            if shown {
+                continue;
+            }
+            if let Some(m) = parse_message(&msg) {
+                if let Some(g) = ttp::gaze83::decode_gaze_frame(&m) {
+                    let l = &g.left;
+                    log!(
+                        "gaze t={}us L point valid={} display=({:.3},{:.3}) pupil={:.2}mm guide valid={} ({:.3},{:.3},{:.3})",
+                        g.device_ts_us, l.gaze_point_norm.valid, l.gaze_point_norm.value[0], l.gaze_point_norm.value[1],
+                        l.pupil_diameter_mm.value, l.position_guide.valid,
+                        l.position_guide.value[0], l.position_guide.value[1], l.position_guide.value[2],
+                    );
+                    shown = true;
+                }
+            }
+        }
+    }
+    log!("streams/notifications received: {count}");
 }
 
 fn open_device() -> rusb::Result<DeviceHandle<GlobalContext>> {

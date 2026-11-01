@@ -33,8 +33,9 @@ pub type DeviceMessage = Vec<u8>;
 struct Shared {
     /// Command responses awaited by sequence number.
     waiters: Mutex<HashMap<u32, SyncSender<DeviceMessage>>>,
-    /// Stream and notification messages, newest last, for the handler to drain.
-    inbox: Mutex<Vec<DeviceMessage>>,
+    /// Stream and notification messages, for a consumer to receive. Dropped
+    /// when the channel is full so a slow consumer never stalls the USB reader.
+    streams: SyncSender<DeviceMessage>,
 }
 
 /// An open TTP session on channel 0.
@@ -42,6 +43,7 @@ pub struct Session {
     usb: Usb,
     seq: AtomicU32,
     shared: Arc<Shared>,
+    stream_rx: Mutex<Option<Receiver<DeviceMessage>>>,
 }
 
 impl Session {
@@ -51,9 +53,10 @@ impl Session {
     pub fn open(usb: Usb, init_packets: &[Vec<u8>]) -> rusb::Result<Self> {
         vendor_control_init(&usb)?;
 
+        let (stream_tx, stream_rx) = sync_channel(1024);
         let shared = Arc::new(Shared {
             waiters: Mutex::new(HashMap::new()),
-            inbox: Mutex::new(Vec::new()),
+            streams: stream_tx,
         });
         {
             let usb = usb.clone();
@@ -64,9 +67,25 @@ impl Session {
                 .expect("spawn ttp reader");
         }
 
-        let session = Session { usb, seq: AtomicU32::new(1), shared };
+        let session = Session { usb, seq: AtomicU32::new(1), shared, stream_rx: Mutex::new(Some(stream_rx)) };
         session.replay(init_packets)?;
         Ok(session)
+    }
+
+    /// Take the receiver of stream and notification messages (once). The
+    /// caller owns it and reads device streams from it.
+    pub fn take_streams(&self) -> Option<Receiver<DeviceMessage>> {
+        self.stream_rx.lock().unwrap().take()
+    }
+
+    /// Start a device stream (command 1220), e.g. the 0x500 gaze stream.
+    pub fn start_stream(&self, id: u32) -> rusb::Result<()> {
+        self.command(protocol::cmd::STREAM_START, &protocol::stream_start_payload(id)).map(|_| ())
+    }
+
+    /// Stop a device stream (command 1230).
+    pub fn stop_stream(&self, id: u32) -> rusb::Result<()> {
+        self.command(protocol::cmd::STREAM_STOP, &protocol::stream_id_payload(id)).map(|_| ())
     }
 
     /// The next command sequence number.
@@ -142,10 +161,6 @@ impl Session {
         Ok(())
     }
 
-    /// Take the stream and notification messages received since the last call.
-    pub fn drain_inbox(&self) -> Vec<DeviceMessage> {
-        std::mem::take(&mut *self.shared.inbox.lock().unwrap())
-    }
 }
 
 /// The sequence number a bulk-OUT packet's command expects echoed, or `None`
@@ -203,7 +218,8 @@ fn route(shared: &Shared, msg: DeviceMessage) {
             }
         }
         MARKER_STREAM | MARKER_NOTIFICATION => {
-            shared.inbox.lock().unwrap().push(msg);
+            // Drop rather than block the USB reader if the consumer is behind.
+            let _ = shared.streams.try_send(msg);
         }
         _ => {}
     }
@@ -214,7 +230,3 @@ pub fn builtin_init_packets() -> Vec<Vec<u8>> {
     const TEXT: &str = include_str!("../../assets/ttp_init_packets.txt");
     protocol::parse_init_packets(TEXT).expect("built-in init packets parse").into_iter().map(|p| p.data).collect()
 }
-
-// Keep the `Receiver` type referenced so a future async variant can reuse it.
-#[allow(dead_code)]
-type _Rx = Receiver<DeviceMessage>;
