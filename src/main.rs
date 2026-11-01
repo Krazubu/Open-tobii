@@ -1,13 +1,15 @@
-//! Prototype of Tobii's USB service (`tobiiusbserviced`) for macOS.
+//! Prototype of Tobii's USB service for macOS and Windows.
 //!
-//! It opens the ET5 over USB and serves it on a Unix socket named
-//! `TOBII-<serial>`, which is what Tobii's client libraries (Stream Engine,
-//! `libtobii_research` in Eye Tracker Manager) discover as
-//! `tobii-ttp://<serial>` and connect to. Behaviour mirrors the Linux service
-//! 2.1.5 (`libtobii_libc.so`, reversed statically):
+//! It opens the ET5 over USB and serves it under the name `TOBII-<serial>`
+//! (a Unix socket in `/var/run` on macOS, a named pipe on Windows), which is
+//! what Tobii's client libraries (Stream Engine, `libtobii_research` in Eye
+//! Tracker Manager) discover as `tobii-ttp://<serial>` and connect to. USB
+//! behaviour mirrors the Linux service 2.1.5 (`libtobii_libc.so`, reversed
+//! statically):
 //!
-//! * a client's first message is one byte, its connection mode:
-//!   1 = TTP, 3 = time sync, 4 = firmware upgrade, 6 = SCP (2 and 5 accepted);
+//! * a client's connection mode (first byte on macOS, first word on
+//!   Windows): 1 = TTP, 3 = time sync, 4 = firmware upgrade, 6 = SCP (2 and
+//!   5 accepted);
 //! * mode 1 gets a TTP channel 0..31; the service opens it on the device with
 //!   vendor control OUT 65 (wValue = channel) and closes it with 66;
 //! * every client write goes to bulk EP 0x05 as `[u32 LE channel][u32 LE
@@ -21,12 +23,16 @@
 
 use rusb::{DeviceHandle, GlobalContext};
 use std::io::{ErrorKind, Read, Write};
-use std::os::unix::fs::PermissionsExt;
-use std::os::unix::net::{UnixListener, UnixStream};
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
+
+#[cfg(unix)]
+#[path = "transport_unix.rs"]
+mod transport;
+#[cfg(windows)]
+#[path = "transport_windows.rs"]
+mod transport;
 
 const VID: u16 = 0x2104;
 const PID: u16 = 0x0313;
@@ -45,15 +51,24 @@ const REQ_CHANNEL_CLOSE: u8 = 66;
 const REQ_TIMESYNC: u8 = 69;
 
 type Handle = Arc<DeviceHandle<GlobalContext>>;
-type Slots = Arc<Mutex<Vec<Option<UnixStream>>>>;
+type Writer = Box<dyn Write + Send>;
+type Slots = Arc<Mutex<Vec<Option<Writer>>>>;
 
 static START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
 
 macro_rules! log {
     ($($arg:tt)*) => {{
-        let t = START.get_or_init(Instant::now).elapsed();
+        let t = $crate::START.get_or_init(std::time::Instant::now).elapsed();
         eprintln!("[{:>8.3}] {}", t.as_secs_f64(), format!($($arg)*));
     }};
+}
+
+/// A client after its handshake: its connection mode, what it sends and
+/// where to answer it.
+pub struct Conn {
+    pub mode: u32,
+    pub reader: Box<dyn Read + Send>,
+    pub writer: Writer,
 }
 
 struct Bridge {
@@ -66,15 +81,15 @@ struct Bridge {
 
 fn main() {
     START.get_or_init(Instant::now);
-    let mut dir = PathBuf::from("/var/run");
+    let mut dir = None;
     let mut name_override = None;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
-            "--dir" => dir = PathBuf::from(args.next().expect("--dir needs a path")),
+            "--dir" => dir = Some(args.next().expect("--dir needs a path")),
             "--name" => name_override = Some(args.next().expect("--name needs a value")),
             _ => {
-                eprintln!("usage: ttpbridge [--dir /var/run] [--name <serial>]");
+                eprintln!("usage: ttpbridge [--dir <socket dir, macOS only>] [--name <serial>]");
                 std::process::exit(2);
             }
         }
@@ -91,15 +106,12 @@ fn main() {
     log!("device serial {serial}");
     scp_metadata(&usb);
 
-    let path = dir.join(format!("TOBII-{serial}"));
-    let _ = std::fs::remove_file(&path);
-    let listener = UnixListener::bind(&path).unwrap_or_else(|e| {
-        log!("cannot bind {}: {e}", path.display());
-        std::process::exit(1);
-    });
-    // The service runs as root; clients such as Eye Tracker Manager do not.
-    let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o666));
-    log!("listening on {} (clients see tobii-ttp://{serial})", path.display());
+    let mut listener = transport::Listener::bind(&format!("TOBII-{serial}"), dir.as_deref())
+        .unwrap_or_else(|e| {
+            log!("cannot create the TOBII-{serial} endpoint: {e}");
+            std::process::exit(1);
+        });
+    log!("listening on {} (clients see tobii-ttp://{serial})", listener.describe());
 
     let bridge = Arc::new(Bridge {
         usb: usb.clone(),
@@ -114,13 +126,19 @@ fn main() {
         thread::spawn(move || usb_read_loop(&usb, &slots));
     }
 
-    for (n, conn) in listener.incoming().enumerate() {
-        match conn {
-            Ok(stream) => {
+    for n in 0.. {
+        match listener.accept() {
+            Ok(pending) => {
                 let b = bridge.clone();
-                thread::spawn(move || handle_client(&b, n, stream));
+                thread::spawn(move || match pending.handshake() {
+                    Ok(conn) => handle_client(&b, n, conn),
+                    Err(e) => log!("client {n}: handshake failed ({e})"),
+                });
             }
-            Err(e) => log!("accept failed: {e}"),
+            Err(e) => {
+                log!("accept failed: {e}");
+                thread::sleep(Duration::from_millis(200));
+            }
         }
     }
 }
@@ -199,32 +217,28 @@ fn deliver(slots: &Slots, mask: u32, payload: &[u8]) {
         if mask & (1 << ch) == 0 {
             continue;
         }
-        let Some(stream) = slots[ch].as_mut() else { continue };
-        if let Err(e) = stream.write_all(payload) {
+        let Some(writer) = slots[ch].as_mut() else { continue };
+        if let Err(e) = writer.write_all(payload).and_then(|_| writer.flush()) {
             log!("channel {ch}: client write failed ({e}); dropping it");
             slots[ch] = None;
         }
     }
 }
 
-fn handle_client(b: &Bridge, n: usize, mut stream: UnixStream) {
-    let mut mode = [0u8; 1];
-    if let Err(e) = stream.read_exact(&mut mode) {
-        log!("client {n}: no mode byte ({e})");
-        return;
-    }
-    log!("client {n}: connection mode {}", mode[0]);
-    match mode[0] {
-        1 => ttp_client(b, n, stream),
-        3 => timesync_client(b, n, stream),
-        6 => scp_client(n, stream),
-        2 | 4 | 5 => drain_client(n, stream),
+fn handle_client(b: &Bridge, n: usize, conn: Conn) {
+    log!("client {n}: connection mode {}", conn.mode);
+    match conn.mode {
+        1 => ttp_client(b, n, conn),
+        3 => timesync_client(b, n, conn),
+        6 => scp_client(n, conn),
+        2 | 4 | 5 => drain_client(n, conn),
         m => log!("client {n}: invalid mode {m}, closing"),
     }
 }
 
-fn ttp_client(b: &Bridge, n: usize, mut stream: UnixStream) {
-    let Some(ch) = allocate_channel(b, &stream) else {
+fn ttp_client(b: &Bridge, n: usize, conn: Conn) {
+    let Conn { mut reader, writer, .. } = conn;
+    let Some(ch) = allocate_channel(b, writer) else {
         log!("client {n}: no free TTP channel");
         return;
     };
@@ -237,7 +251,7 @@ fn ttp_client(b: &Bridge, n: usize, mut stream: UnixStream) {
 
     let mut buf = vec![0u8; 4096];
     loop {
-        match stream.read(&mut buf) {
+        match reader.read(&mut buf) {
             Ok(0) => break,
             Ok(len) => {
                 if let Err(e) = send_to_device(b, ch, &buf[..len]) {
@@ -258,8 +272,7 @@ fn ttp_client(b: &Bridge, n: usize, mut stream: UnixStream) {
 }
 
 /// Next free channel, round robin as the Linux service does.
-fn allocate_channel(b: &Bridge, stream: &UnixStream) -> Option<usize> {
-    let writer = stream.try_clone().ok()?;
+fn allocate_channel(b: &Bridge, writer: Writer) -> Option<usize> {
     let mut slots = b.slots.lock().unwrap();
     let mut next = b.next_channel.lock().unwrap();
     for i in 0..CHANNELS {
@@ -291,9 +304,10 @@ fn send_to_device(b: &Bridge, ch: usize, data: &[u8]) -> rusb::Result<()> {
 /// Mode 3: each 18-byte request goes to the device through vendor request 69
 /// (22 bytes: u32 client slot + the 18 bytes), and the 18 bytes after the
 /// slot in the device's answer go back to the client.
-fn timesync_client(b: &Bridge, n: usize, mut stream: UnixStream) {
+fn timesync_client(b: &Bridge, n: usize, conn: Conn) {
+    let Conn { mut reader, mut writer, .. } = conn;
     let mut req = [0u8; 18];
-    while stream.read_exact(&mut req).is_ok() {
+    while reader.read_exact(&mut req).is_ok() {
         let mut pkt = [0u8; 22];
         pkt[0..4].copy_from_slice(&(n as u32).to_le_bytes());
         pkt[4..22].copy_from_slice(&req);
@@ -303,7 +317,7 @@ fn timesync_client(b: &Bridge, n: usize, mut stream: UnixStream) {
             .and_then(|_| b.usb.read_control(0xC1, REQ_TIMESYNC, 1, 0, &mut pkt, CTRL_TIMEOUT));
         match res {
             Ok(22) => {
-                if stream.write_all(&pkt[4..22]).is_err() {
+                if writer.write_all(&pkt[4..22]).and_then(|_| writer.flush()).is_err() {
                     break;
                 }
             }
@@ -322,24 +336,26 @@ fn timesync_client(b: &Bridge, n: usize, mut stream: UnixStream) {
 
 /// Mode 6: answer every 24-byte SCP request "not supported", as the Linux
 /// service does for requests it does not serve itself.
-fn scp_client(n: usize, mut stream: UnixStream) {
+fn scp_client(n: usize, conn: Conn) {
+    let Conn { mut reader, mut writer, .. } = conn;
     let mut req = [0u8; 24];
-    while stream.read_exact(&mut req).is_ok() {
+    while reader.read_exact(&mut req).is_ok() {
         log!("client {n}: SCP request {:02x?}, answering not supported", &req);
         let mut rsp = [0u8; 24];
         rsp[0..4].copy_from_slice(&1u32.to_le_bytes());
         rsp[4..8].copy_from_slice(&1u32.to_le_bytes());
         rsp[16..20].copy_from_slice(&0xFFFF_FFFEu32.to_le_bytes());
-        if stream.write_all(&rsp).is_err() {
+        if writer.write_all(&rsp).and_then(|_| writer.flush()).is_err() {
             break;
         }
     }
 }
 
-fn drain_client(n: usize, mut stream: UnixStream) {
+fn drain_client(n: usize, conn: Conn) {
+    let Conn { mut reader, .. } = conn;
     let mut buf = [0u8; 4096];
     let mut total = 0usize;
-    while let Ok(len) = stream.read(&mut buf) {
+    while let Ok(len) = reader.read(&mut buf) {
         if len == 0 {
             break;
         }

@@ -9,17 +9,18 @@ Unix socket that Tobii's own USB service would create, so PETM's SDK
 (`libtobii_research`) discovers it, applies its licence and talks to it as to
 any other tracker.
 
-> Status: prototype. Tested on one setup only: macOS 10.14.6 (Intel), Eye
-> Tracker 5 `IS5FF-…` (USB `2104:0313`, firmware `02a1a6a977`), PETM 2.6.1.
-> Discovery, licensing, the position guide, gaze visualisation and
-> calibration work there. Independently written; not affiliated with or
-> endorsed by Tobii.
+> Status: prototype. Tested with one Eye Tracker 5 `IS5FF-…` (USB
+> `2104:0313`, firmware `02a1a6a977`) on macOS 10.14.6 (Intel) with PETM
+> 2.6.1, on a MacBook Pro M4 with PETM 2.6.1 and 2.7.2, and on Windows 11
+> ARM64 with PETM 2.6.1. Discovery, licensing, the position guide, gaze
+> visualisation and calibration work.
+> Independently written; not affiliated with or endorsed by Tobii.
 
 ## What you need
 
 1. `ttpbridge`, running as root on the Mac the tracker is plugged into.
-2. PETM 2.6.1 installed in a folder whose path does **not** contain the word
-   `test` (see [Gotchas](#gotchas)).
+2. PETM 2.6.1 (or 2.7.2 plus a copy of 2.6.1) installed in a folder whose
+   path does **not** contain the word `test` (see [Gotchas](#gotchas)).
 3. PETM patched so that its interface lists the Eye Tracker 5
    (`scripts/patch-petm.sh`).
 
@@ -68,6 +69,54 @@ target/release/ttpbridge --dir /tmp &
 target/release/ttpclient /tmp/TOBII-<serial> --timesync
 ```
 
+### Windows
+
+The same program runs on Windows, where it serves the tracker on the named
+pipe `\\.\pipe\TOBII-<serial>` instead. Tested on Windows 11 ARM64 (a
+Parallels VM on a MacBook Pro M4), where Tobii's own driver package has no
+ARM64 support, with Tobii's Stream Engine 4.25 (x64, emulated): discovery,
+device info and gaze points at 33 Hz work.
+
+1. Give the tracker's interface the in-box WinUSB driver: Device Manager ›
+   "EyeChip" › Update driver › Browse my computer › Let me pick › Universal
+   Serial Bus devices › "WinUsb Device". (On x64 Windows with Tobii's
+   software installed, it already has WinUSB.)
+2. Stop anything else holding that interface: the legacy "Tobii Service"
+   (EyeX) opens it, and the bridge then fails with "Access denied".
+3. Run `ttpbridge.exe` (no administrator rights needed) with `libunwind.dll`
+   next to it if you built with llvm-mingw.
+4. Use PETM **2.6.1** for Windows, patched so that its interface lists the
+   tracker (same five bytes as on macOS, at another offset; checks the
+   SHA-256, keeps `app.asar.orig`, `-Restore` undoes it; quit PETM first):
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File scripts\patch-petm.ps1
+   ```
+
+   Tested on Windows 11 ARM64: PETM applies its licence, initialises the
+   tracker and shows gaze and the position guide.
+
+Build from macOS with [llvm-mingw](https://github.com/mstorsjo/llvm-mingw):
+
+```sh
+rustup target add aarch64-pc-windows-gnullvm
+PATH="$HOME/opt/llvm-mingw/bin:$PATH" \
+CC_aarch64_pc_windows_gnullvm=aarch64-w64-mingw32-clang \
+AR_aarch64_pc_windows_gnullvm=llvm-ar \
+cargo build --release --target aarch64-pc-windows-gnullvm
+cp ~/opt/llvm-mingw/aarch64-w64-mingw32/bin/libunwind.dll target/aarch64-pc-windows-gnullvm/release/
+```
+
+(`x86_64-pc-windows-gnullvm` the same way for x64 Windows.) Tobii's
+Windows transport uses one pipe per direction: the client creates its own
+inbound pipe `client_TOBII-<serial>_<pid>_<n>`, connects to the server pipe
+and sends `[u32 mode][its pipe name]`; the bridge then opens the client's
+pipe to answer. PETM 2.7.2 for Windows ships Pro SDK 2.0 like the macOS
+build, so it cannot see the bridge; the SDK-module swap used on macOS has
+not been tried on Windows.
+
+### Start at boot (macOS)
+
 To start the bridge at boot, see
 [`packaging/com.github.krazubu.tobii-et5-bridge.plist`](packaging/com.github.krazubu.tobii-et5-bridge.plist)
 (not tested yet).
@@ -76,19 +125,40 @@ To start the bridge at boot, see
 
 PETM's interface hides any tracker whose serial prefix is not on its list of
 supported trackers, and `IS5FF` is on neither the built-in list nor the one it
-downloads at start-up. The script swaps one obsolete entry of the built-in
-list (`TX300`) for `IS5FF`: five bytes in the app's own `app.asar`, same
-length, with a backup kept as `app.asar.orig`. It checks the SHA-256 of
-`app.asar` first and refuses anything but PETM 2.6.1.
+downloads at start-up. The script checks the SHA-256 of `app.asar`, refuses
+any version it does not know, keeps backups (`app.asar.orig`,
+`SdkJsBinding.app.orig`) and can put them back with `--restore`.
+
+**PETM 2.6.1**: one obsolete entry of the built-in list (`TX300`) becomes
+`IS5FF`, five bytes, same length.
 
 ```sh
 scripts/patch-petm.sh "/Applications/Tobii Pro Eye Tracker Manager.app"
-scripts/patch-petm.sh --restore "/Applications/Tobii Pro Eye Tracker Manager.app"
 ```
 
-Quit PETM before running it; use `sudo` if the app is in `/Applications`.
-This patch only changes which products the interface displays. Licensing is
-untouched: PETM applies its own licence to the tracker, and that succeeds.
+**PETM 2.7.2**: the list has no obsolete entry left, so the interface's
+filter function is rewritten at the same length to accept `IS5FF-*` on top
+of the list (every other tracker is filtered exactly as before). This version
+also ships Tobii Pro SDK 2.0, which only talks PRP to Tobii's Platform Runtime
+and dropped TTP altogether, so it cannot see `ttpbridge`. The script puts
+PETM 2.6.1's SDK module (`stage/SdkJsBinding.app`, Pro SDK 1.11, which still
+talks TTP) in its place, copied from your own 2.6.1 install. The messages
+exchanged between the interface and the SDK module are the same in both
+versions.
+
+```sh
+scripts/patch-petm.sh "/Applications/Tobii Pro Eye Tracker Manager.app" --sdk-from "/path/to/PETM 2.6.1.app"
+```
+
+Undo with `scripts/patch-petm.sh --restore <app>`.
+
+Quit PETM before running it. On recent macOS, the terminal you run it from
+needs the *App Management* permission (System Settings › Privacy &
+Security) to modify an app in `/Applications`; otherwise `cp` fails with
+"Operation not permitted" and nothing is changed. These patches only change
+which products the interface displays and which SDK module it starts;
+licensing is untouched: PETM applies its own licence to the tracker, and that
+succeeds.
 
 ## How it works
 
@@ -131,6 +201,9 @@ on purpose) and SCP (mode 6 is answered "not supported").
 - `src/bin/ttpclient.rs`: connects like Tobii's libraries do, sends the first
   TTP commands the Windows software sends (protocol negotiation, device
   identity) and prints the answers; `--timesync` also tries the time sync.
+- `tools/se_probe.c`: loads Tobii's Stream Engine DLL on Windows and checks
+  discovery, device info and gaze through the bridge (build it with
+  `x86_64-w64-mingw32-clang` for the x64 DLL).
 - `tools/research_probe.c`: asks `libtobii_research` (from your own PETM
   install) what it sees: discovery, identity, gaze. Build instructions are in
   the file. Outside PETM, gaze is refused for lack of a licence; that is
