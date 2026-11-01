@@ -34,6 +34,11 @@ mod transport;
 #[path = "transport_windows.rs"]
 mod transport;
 
+// The PRP server (Pro SDK 2.0 / PETM 2.7.2) is being built up; not yet wired
+// into the client dispatch.
+#[allow(dead_code)]
+mod prp;
+
 const VID: u16 = 0x2104;
 const PID: u16 = 0x0313;
 const IFACE: u8 = 0;
