@@ -27,6 +27,12 @@ use tobii_ipc::geometry::DisplayArea;
 /// File name in the per-user Tobii directory.
 pub const FILE_NAME: &str = "display-area";
 
+/// The size (width, height) of the display area the init replay configures
+/// while none is saved, to 0.1 mm: the Windows capture's, a 28.2" screen
+/// wider than 16:9, and no monitor of the user's. `tobii-usb` checks it
+/// against the replay.
+pub const BUILT_IN_MM: (f64, f64) = (633.6, 334.3);
+
 /// Where the display area is saved, if there is a per-user directory (see
 /// [`crate::store::config_dir`]).
 #[must_use]

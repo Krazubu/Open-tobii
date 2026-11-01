@@ -41,6 +41,12 @@ had, and for those 4.25 added in the 0.3.0 entry below and the README's
   answered, Tab (Shift+Tab: back) moves it to the next monitor, the setup
   starting again there. `--list-monitors` shows each monitor's size and the
   one it would open on.
+- **`tobii-calibrate --status`** says what the tracker runs on — your
+  calibration or the built-in one, your display area or the built-in one —
+  whether it is plugged in, and what to do: calibrate, calibrate again with
+  the display setup, or calibrate again because the display area changed
+  after the calibration was made. It reads files only, and starts no daemon.
+  The bug report template asks for it.
 
 ### Changed
 

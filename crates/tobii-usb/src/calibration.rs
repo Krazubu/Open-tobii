@@ -256,6 +256,19 @@ mod tests {
         assert!((written.top_right_mm[0] - written.top_left_mm[0] - 597.0).abs() < 1e-6);
     }
 
+    /// What the clients and the daemon's log say the built-in area is.
+    #[test]
+    fn the_built_in_area_is_the_size_the_store_names() {
+        let packets = embedded_packets().expect("embedded");
+        let (_, area, _) = written_display_area(&packets).expect("the replay's 1440");
+
+        let (width, height) = tobii_calib::display::size_mm(&area);
+
+        let (named_width, named_height) = tobii_calib::display::BUILT_IN_MM;
+        assert!((width - named_width).abs() < 0.05, "{width}");
+        assert!((height - named_height).abs() < 0.05, "{height}");
+    }
+
     #[test]
     fn the_area_written_reads_back_as_the_wire_carries_it() {
         let packets = embedded_packets().expect("embedded");

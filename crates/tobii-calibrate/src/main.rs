@@ -22,6 +22,7 @@ mod ipc;
 mod remembered;
 mod sequence;
 mod setup;
+mod status;
 mod ui;
 
 use std::fmt;
@@ -54,6 +55,8 @@ usage: tobii-calibrate [options]
   --verify-secs N    how long to show the result with the live gaze (15)
   --export PATH      also write the calibration to PATH
   --reset            go back to the driver's built-in calibration and exit
+  --status           say what the tracker runs on (your calibration and
+                     display area, or the built-in ones) and exit
   --dry-run          run the screens without a tracker
   --windowed         a 1280x800 window instead of fullscreen
 
@@ -68,6 +71,7 @@ struct Options {
     verify: Duration,
     export: Option<String>,
     reset: bool,
+    status: bool,
     dry_run: bool,
     windowed: bool,
     display_setup: bool,
@@ -82,6 +86,7 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Options> {
         verify: Duration::from_secs(15),
         export: None,
         reset: false,
+        status: false,
         dry_run: false,
         windowed: false,
         display_setup: true,
@@ -110,6 +115,7 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Options> {
             }
             "--export" => o.export = Some(value("--export")?),
             "--reset" => o.reset = true,
+            "--status" => o.status = true,
             "--dry-run" => o.dry_run = true,
             "--windowed" => o.windowed = true,
             "--no-display-setup" => o.display_setup = false,
@@ -316,6 +322,10 @@ fn window_failure(
 
 fn run() -> Result<()> {
     let o = parse_args(std::env::args().skip(1))?;
+    if o.status {
+        print!("{}", status::Status::read().report());
+        return Ok(());
+    }
     if o.reset {
         return reset();
     }
@@ -468,6 +478,7 @@ mod tests {
             (3, Duration::from_millis(600), true, false)
         );
         assert!(parse(&[]).expect("defaults").display_setup);
+        assert!(parse(&["--status"]).expect("status").status);
         assert_eq!(
             parse(&["--monitor", "DP-2"]).expect("name").monitor,
             MonitorChoice::Name("DP-2".into())

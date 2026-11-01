@@ -951,6 +951,12 @@ takes more than a second), and if it has not finished by then, says
 whether the daemon still saves the calibration (the save was under way;
 `--export` then writes nothing) or discards it.
 
+- `--status` says what the tracker runs on: your calibration or the built-in
+  one, your display area or the built-in 633.6 × 334.3 mm, and whether the
+  tracker is plugged in, then what, if anything, to do about it (calibrate;
+  calibrate again with the display setup; calibrate again because the
+  display area changed since). It reads the files tobiid reads, so it
+  starts no daemon and opens no tracker.
 - `--rounds 1` for a quick 7-point pass (half the tracker's 14 stored points
   stay from the previous calibration); `--dwell-ms` to linger longer per point.
 - `--reset` goes back to the built-in calibration; or delete the file, or set
