@@ -135,7 +135,7 @@ embedded assets (it is ~0.45 MB rather than ~20 MB).
 
 `make check` runs what CI would: `cargo fmt --all --check`, clippy with
 `-D warnings` over all targets, the tests, `cargo doc`, and the checks of
-the udev rules and the `.desktop` file. `make verify-abi` asserts
+the udev rules and the `.desktop` files. `make verify-abi` asserts
 `libtobii.so` exports exactly the 199 symbols listed in
 `crates/tobii-ffi/abi-symbols.txt` (the exports of the reference DLL, and
 none of its own), then compiles and runs `crates/tobii-ffi/abi-smoke.c`
