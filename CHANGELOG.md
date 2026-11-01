@@ -11,6 +11,25 @@ written down: in docs/stream-engine-api.md for the entry points 4.1 already
 had, and for those 4.25 added in the 0.3.0 entry below and the README's
 "Limitations".
 
+## Unreleased
+
+### Upgrading
+
+- **Calibrated before 0.4.1, or with `--no-display-setup`? Calibrate
+  again.** Until 0.4.1 the display setup never succeeded, so a calibration
+  made then was made on whatever display area the tracker had, usually the
+  one the init capture carries (below), and gaze is scaled to that area
+  rather than to your monitor.
+
+### Fixed
+
+- **The documents named the wrong display area.** With nothing saved, the
+  tracker gets the area the Windows init capture carries, 633.6 × 334.3 mm
+  (a 28.2" screen, wider than 16:9), not the author's 27" monitor the README
+  and INSTALL.md said it was. Gaze is scaled to it: on a 24" 16:9 monitor,
+  looking at the left and right edges reads about 0.08 and 0.92, on a 49"
+  32:9 one about −0.44 and 1.44.
+
 ## 0.4.1 — 2026-10-28
 
 ### Fixed

@@ -4,8 +4,8 @@
 //! `tobii_set_display_area` across sessions, so the daemon does too: every
 //! area a client sets and the device accepts is written to
 //! `display-area` in the per-user Tobii directory, and loaded at start as the
-//! area the init replay configures (instead of the capture author's
-//! monitor). `TOBII_DISPLAY_MM` only applies while nothing is saved.
+//! area the init replay configures (instead of the Windows capture's,
+//! 633.6 x 334.3 mm). `TOBII_DISPLAY_MM` only applies while nothing is saved.
 //!
 //! The file is text, three corners in millimetres in the tracker's frame:
 //!

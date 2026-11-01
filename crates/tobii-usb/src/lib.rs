@@ -13,7 +13,8 @@
 //! private `time_map` estimates it from the arrivals.
 //!
 //! [`calibration`] adapts the embedded init capture to the user: their saved
-//! calibration and display area replace the capture author's.
+//! calibration and display area replace the capture's (the author's
+//! calibration, and a display area of 633.6 x 334.3 mm).
 //!
 //! The init capture is embedded, so the binaries need no runtime data files.
 

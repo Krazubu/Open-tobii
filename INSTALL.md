@@ -51,8 +51,10 @@ After installing:
   build; nothing from there is needed here). To have it at once:
   `systemctl --user start tobiid.socket`. A client that finds no daemon
   starts one itself anyway;
-- calibrate (§8a): "Tobii Calibration" among the applications, or
-  `tobii-calibrate`;
+- calibrate (§8a), once for each user who wants gaze on the screen (games,
+  applications, gaze-switcher; head pose does not need it): "Tobii
+  Calibration" among the applications, or `tobii-calibrate`. Calibrated
+  before 0.4.1, or with `--no-display-setup`? Calibrate again;
 - gaze to arrow keys (§8): join the `input` group, which lets every program
   you run read all keyboards (§3 weighs it), with
   `sudo usermod -aG input "$USER"`, reboot, then
@@ -503,7 +505,7 @@ output, and its frame is the display area's (`TOBII_DISPLAY_MM` below,
 | `TOBII_NO_IMAGE` | unset | `1` does not start the 0x50e image stream (gaze/presence only; no head pose from the gaze engine) |
 | `TOBII_IMAGE83_DEBUG` | unset | `1` logs the image head-pose worker's statistics every 5 s while a client wants a head pose (an `info` event): the images it made a pose of and the valid poses, per second (`frames_per_s`/`valid_per_s`), the images dropped before it could take them (`overwritten`, 0 when it keeps up), the time per image (`mean_ms`/`p99_ms`/`max_ms`) and the face-detector rate (`detector_runs_per_s`: how often the tracker looked for a lost face) |
 | `RUST_LOG` | `info` | log filter for all binaries (`debug`, `tobii=debug,ort=warn`, …); see §6 |
-| `TOBII_DISPLAY_MM` | unset | your monitor as `<width>x<height>[+<offset_x>]` in mm, e.g. `597x336`: once the tracker reports its mounting, the daemon computes the display area (the Stream Engine's `tobii_calculate_display_area_basic`) and writes it, replacing the capture author's monitor that the init replay configures. Gaze coordinates, and the Stream Engine's head pose, are relative to this area. `offset_x` is how far right of the tracker the screen centre is. Usually unneeded: `tobii-calibrate` sets the display area and the daemon keeps it (§8a); a saved display area wins over this variable, which only fills in while nothing is saved (delete `~/.config/tobii/display-area` to use it). |
+| `TOBII_DISPLAY_MM` | unset | your monitor as `<width>x<height>[+<offset_x>]` in mm, e.g. `597x336`: once the tracker reports its mounting, the daemon computes the display area (the Stream Engine's `tobii_calculate_display_area_basic`) and writes it, replacing the one the init replay configures (633.6 × 334.3 mm, from the Windows capture). Gaze coordinates, and the Stream Engine's head pose, are relative to this area. `offset_x` is how far right of the tracker the screen centre is. Usually unneeded: `tobii-calibrate` sets the display area and the daemon keeps it (§8a); a saved display area wins over this variable, which only fills in while nothing is saved (delete `~/.config/tobii/display-area` to use it). |
 | `TOBII_CALIBRATION` | unset | where the calibration is kept (default `$XDG_CONFIG_HOME/tobii/calibration.bin`), or `embedded` to use the built-in one (§8a) |
 
 Head-pose inference on the image stream runs only while some client subscribes
@@ -847,7 +849,7 @@ TOBII_IMAGE83_DEBUG=1 ./target/release/tobii-opentrack
   validity, saves the first frames as PGM; `--pose` makes the Stream Engine's
   head pose of every image as the daemon does, but without it, which is handy
   for isolating issues, in the display area the init capture writes: the
-  author's monitor for the shipped `init_packets_ep.txt`, not yours;
+  633.6 × 334.3 mm one the shipped `init_packets_ep.txt` carries, not yours;
   `--no-image` is the gaze-only baseline),
   `… image83-replay <log.bin> [--csv out.csv] [--fits fits.csv]
   [--landmarks landmarks.f32]` (runs the tracker over a logged capture;
@@ -863,9 +865,26 @@ TOBII_IMAGE83_DEBUG=1 ./target/release/tobii-opentrack
 
 ### 8a. Calibration
 
-The tracker needs calibrating once per user. Until then it runs on the
-calibration embedded in the init capture, which is the author's, and on the
-author's monitor.
+The tracker needs calibrating once per user, on the monitor it is mounted
+on. Until then it runs on the calibration embedded in the init capture,
+which is the author's, and on the display area that capture carries:
+633.6 × 334.3 mm (a 28.2" screen, wider than 16:9), whatever your monitor
+is. The tracker scales gaze to its display area itself, so the area alone
+puts gaze off on any other screen: looking at the left and right edges of a
+24" 16:9 monitor reads about 0.08 and 0.92 instead of 0 and 1, of a 34" 21:9
+one about −0.13 and 1.13; the author's calibration adds an error of its own
+everywhere.
+
+What needs it: whatever puts gaze on the screen — games and applications
+reading gaze through `libtobii.so`, gaze-switcher, and `tobii-gaze-keys`'
+winks near the edges of a wide monitor (a wink only counts with gaze on the
+screen). What does not: head pose (the display area only shifts it, and
+OpenTrack's centring takes that away), user presence, and `tobii-gaze-keys`'
+arrows, which learn your gaze range themselves.
+
+A calibration made with `--no-display-setup`, or before 0.4.1 (whose display
+setup never succeeded), was made on whatever area the tracker had, usually
+the capture's: calibrate again, with the display setup.
 
 ```bash
 tobii-calibrate --list-monitors         # which monitor is the tracker on?

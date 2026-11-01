@@ -29,6 +29,11 @@ sudo dnf install ./tobii-linux-*.x86_64.rpm   # or: sudo apt install ./tobii-lin
 tobii-calibrate                               # calibrate once; it starts the daemon itself
 ```
 
+Calibrating is once per user, and it is what puts gaze where you look:
+games and applications reading gaze through `libtobii.so` need it, and so
+does gaze-switcher. Head pose (OpenTrack) and `tobii-gaze-keys`' arrows work
+without it.
+
 Gaze to arrow keys and head pose to OpenTrack are opt-in, one `systemctl
 --user enable` each — [INSTALL.md §3](INSTALL.md) says what each one needs
 (the key injection wants the `input` group, and says what that costs).
@@ -275,10 +280,17 @@ tools/headpose/truth.py --session LOG JSONL FITS ...         # yaw and pitch vs 
   does; `tobii-opentrack` then sends nothing, and OpenTrack holds the last
   pose.
 - Until you run `tobii-calibrate`, the calibration in use is the one embedded
-  in `init_packets_ep.txt` — the author's. Likewise the display area is the
-  author's 27" monitor until you set yours: `tobii-calibrate` does it first
-  (you line two ticks up with the marks on the tracker), and the daemon keeps
-  whatever display area is set (`~/.config/tobii/display-area`).
+  in `init_packets_ep.txt` — the author's — and the display area is the one
+  that capture carries, 633.6 × 334.3 mm (a 28.2" screen, wider than 16:9),
+  whatever your monitor is. The tracker scales gaze to that area, so on any
+  other screen gaze misses the edges: looking at the left and right edges of
+  a 24" 16:9 monitor reads about 0.08 and 0.92, of a 49" 32:9 one about
+  −0.44 and 1.44. `tobii-calibrate` sets your area first (you line two ticks
+  up with the marks on the tracker), and the daemon keeps whatever display
+  area is set (`~/.config/tobii/display-area`). A calibration made with
+  `--no-display-setup`, or before 0.4.1 (whose display setup never
+  succeeded), was made on whatever area the tracker had, usually the
+  capture's: calibrate again.
 - **Only the Eye Tracker 5** (`2104:0313`). A 5L, 4C or anything else answers
   a different stream catalogue and a different generation, and none has been
   seen; see [CONTRIBUTING.md](CONTRIBUTING.md) for what a capture of one would

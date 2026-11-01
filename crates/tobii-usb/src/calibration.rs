@@ -1,6 +1,6 @@
 //! The init replay, adapted to this user: their saved calibration instead of
-//! the one embedded in the capture, and their display area instead of the
-//! capture author's monitor.
+//! the one embedded in the capture (the author's), and their display area
+//! instead of the capture's (633.6 x 334.3 mm).
 //!
 //! Both are single commands inside the replay (1110 write-calibration, split
 //! over 162 bulk writes, and 1440 set-display-area); they are rebuilt with the

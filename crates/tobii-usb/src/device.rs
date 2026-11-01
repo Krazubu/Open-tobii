@@ -4343,7 +4343,7 @@ mod tests {
         assert_eq!(
             crate::calibration::written_display_area(&packets),
             Some((0x0e, a, id)),
-            "the capture author's monitor, bit for bit as the Windows device read it back"
+            "the capture's display area, bit for bit as the Windows device read it back"
         );
         let (b, _) = area_of("change-display-cmd-1440");
         assert_ne!(DisplayFrame::new(&a), DisplayFrame::new(&b), "A and B");

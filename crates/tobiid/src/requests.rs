@@ -598,8 +598,8 @@ pub(crate) fn restore_saved_display_area(st: &mut State) {
 
 /// A monitor size from `TOBII_DISPLAY_MM=<width>x<height>[+<offset_x>]` (mm):
 /// the display area is computed from it and the tracker's mounting once the
-/// device reports the mounting, replacing the capture author's monitor that
-/// the init replay would otherwise leave configured.
+/// device reports the mounting, replacing the area the init replay would
+/// otherwise leave configured (the Windows capture's, 633.6 x 334.3 mm).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct DisplaySize {
     width_mm: f64,
