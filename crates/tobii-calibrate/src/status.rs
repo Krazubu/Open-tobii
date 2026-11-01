@@ -407,6 +407,11 @@ fn unescape(s: &str) -> String {
         match chars.next() {
             Some('n') => out.push('\n'),
             Some('t') => out.push('\t'),
+            Some('r') => out.push('\r'),
+            Some('a') => out.push('\u{7}'),
+            Some('b') => out.push('\u{8}'),
+            Some('v') => out.push('\u{b}'),
+            Some('f') => out.push('\u{c}'),
             Some(e @ ('\\' | '\'' | '"')) => out.push(e),
             Some(other) => {
                 out.push('\\');
@@ -635,6 +640,7 @@ mod tests {
             Some(("TOBII_CALIBRATION".into(), "/home/a b/it's.bin".into()))
         );
         assert_eq!(manager_assignment("no assignment"), None);
+        assert_eq!(unescape(r"a\tb\rc\qd\\"), "a\tb\rc\\qd\\");
         // As `systemctl show -p Environment --value` prints a unit's.
         assert_eq!(
             unit_words(r#"A=1 "B=x y" "C=q\"z" D="#),

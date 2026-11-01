@@ -24,7 +24,7 @@ use anyhow::{Context, Result};
 use tobii_calib::display;
 use tobii_calib::store;
 
-use crate::status::{Missing, Status};
+use crate::status::{Area, Missing, Status};
 
 /// File in the per-user Tobii directory that keeps what was shown.
 const STATE_FILE: &str = "reminders";
@@ -234,7 +234,10 @@ struct Texts {
     by_hand: &'static str,
 }
 
-fn texts(reason: Missing, language: Language) -> Texts {
+/// The reminder for `reason`; `area_built_in` when the tracker also runs on
+/// the built-in display area (the user's may be saved without a
+/// calibration: after `--reset`, say).
+fn texts(reason: Missing, area_built_in: bool, language: Language) -> Texts {
     let (w, h) = display::BUILT_IN_MM;
     // A decimal comma in Russian.
     let (w_ru, h_ru) = (
@@ -248,11 +251,16 @@ fn texts(reason: Missing, language: Language) -> Texts {
                 Missing::DisplayArea => "Calibrate your eye tracker again",
             },
             body: match reason {
-                Missing::Calibration => "Your Tobii Eye Tracker 5 runs on a calibration made for \
-                    someone else, and on a display area that is not your monitor's, so gaze on \
-                    the screen lands away from where you look. Calibrating takes about a minute; \
-                    head tracking does not need it."
-                    .to_owned(),
+                Missing::Calibration => format!(
+                    "Your Tobii Eye Tracker 5 runs on a calibration made for someone else{}, so \
+                     gaze on the screen lands away from where you look. Calibrating takes about \
+                     a minute; head tracking does not need it.",
+                    if area_built_in {
+                        ", and on a display area that is not your monitor's"
+                    } else {
+                        ""
+                    }
+                ),
                 Missing::DisplayArea => format!(
                     "Your calibration was made without the display setup (with \
                      --no-display-setup, or before tobii-linux 0.4.1), so gaze is scaled to a \
@@ -271,11 +279,16 @@ fn texts(reason: Missing, language: Language) -> Texts {
                 Missing::DisplayArea => "Откалибруйте айтрекер заново",
             },
             body: match reason {
-                Missing::Calibration => "Tobii Eye Tracker 5 работает на калибровке, сделанной \
-                    для другого человека, и с областью экрана не вашего монитора, поэтому взгляд \
-                    попадает не туда, куда вы смотрите. Калибровка займёт около минуты. Для \
-                    отслеживания головы она не нужна."
-                    .to_owned(),
+                Missing::Calibration => format!(
+                    "Tobii Eye Tracker 5 работает на калибровке, сделанной для другого \
+                     человека{}, поэтому взгляд попадает не туда, куда вы смотрите. Калибровка \
+                     займёт около минуты. Для отслеживания головы она не нужна.",
+                    if area_built_in {
+                        ", и с областью экрана не вашего монитора"
+                    } else {
+                        ""
+                    }
+                ),
                 Missing::DisplayArea => format!(
                     "Ваша калибровка сделана без настройки экрана (с --no-display-setup или до \
                      tobii-linux 0.4.1), поэтому трекер соотносит взгляд с экраном {w_ru} × \
@@ -325,12 +338,13 @@ fn notify_send_features() -> Option<(bool, bool)> {
     ))
 }
 
-/// Where `notify-send` leaves the activation token for the window.
-fn token_path() -> PathBuf {
+/// Where `notify-send` leaves the activation token for the window: the
+/// user's runtime directory, which only they can write to. None without
+/// one: a predictable name in a shared /tmp could be someone else's link.
+fn token_path() -> Option<PathBuf> {
     std::env::var_os("XDG_RUNTIME_DIR")
         .filter(|d| !d.is_empty())
-        .map_or_else(std::env::temp_dir, PathBuf::from)
-        .join(format!("tobii-calibrate-token-{}", std::process::id()))
+        .map(|dir| PathBuf::from(dir).join(format!("tobii-calibrate-token-{}", std::process::id())))
 }
 
 /// Show the reminder and wait for what the user does with it, with the
@@ -404,7 +418,7 @@ fn notify_with_buttons(texts: &Texts, with_token: bool) -> (Answer, Option<Strin
         texts.summary.to_owned(),
         texts.body.clone(),
     ];
-    let token_file = with_token.then(token_path);
+    let token_file = with_token.then(token_path).flatten();
     let mut command = if let Some(file) = &token_file {
         let mut sh = Command::new("sh");
         sh.args([
@@ -457,7 +471,10 @@ fn calibrate(token: Option<&str>) -> Result<()> {
     let mut command = Command::new(program);
     command.stdin(Stdio::null());
     if let Some(token) = token {
-        command.env("XDG_ACTIVATION_TOKEN", token);
+        // winit reads the first on Wayland, the second on X11.
+        command
+            .env("XDG_ACTIVATION_TOKEN", token)
+            .env("DESKTOP_STARTUP_ID", token);
     }
     let status = command
         .status()
@@ -533,7 +550,9 @@ pub(crate) fn run() -> Result<()> {
     reminders.record(missing, now);
     save(&path, &reminders)?;
     let language = language(|name| std::env::var(name).ok());
-    match notify(&texts(missing, language)) {
+    let area_built_in = matches!(status.area, Area::BuiltIn { .. } | Area::Unusable { .. })
+        && status.display_env.is_none();
+    match notify(&texts(missing, area_built_in, language)) {
         (Answer::Calibrate, token) => calibrate(token.as_deref()),
         (Answer::Never, _) => {
             reminders.off = true;
@@ -638,7 +657,7 @@ mod tests {
     fn every_reminder_has_its_words() {
         for language in [Language::English, Language::Russian] {
             for reason in [Missing::Calibration, Missing::DisplayArea] {
-                let t = texts(reason, language);
+                let t = texts(reason, true, language);
                 assert!(
                     [t.summary, t.calibrate, t.never, t.by_hand]
                         .iter()
@@ -648,10 +667,20 @@ mod tests {
                 );
             }
         }
-        let area = texts(Missing::DisplayArea, Language::English).body;
+        let area = texts(Missing::DisplayArea, true, Language::English).body;
         assert!(area.contains("633.6 × 334.3 mm"), "{area}");
-        let area = texts(Missing::DisplayArea, Language::Russian).body;
+        let area = texts(Missing::DisplayArea, true, Language::Russian).body;
         assert!(area.contains("633,6 × 334,3 мм"), "{area}");
+        // A display area of the user's, but no calibration (after --reset).
+        for language in [Language::English, Language::Russian] {
+            let with = texts(Missing::Calibration, true, language).body;
+            let without = texts(Missing::Calibration, false, language).body;
+            assert!(with.len() > without.len(), "{language:?}: {without}");
+            assert!(
+                !without.contains("monitor") && !without.contains("монитор"),
+                "{without}"
+            );
+        }
     }
 
     #[test]
