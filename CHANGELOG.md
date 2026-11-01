@@ -58,6 +58,13 @@ had, and for those 4.25 added in the 0.3.0 entry below and the README's
   after the calibration was made. It reads files only, and starts no daemon.
   The bug report template asks for it.
 
+### Removed
+
+- **The desktop entry's "Calibrate without the Display Setup" action.**
+  One click from the applications menu, it calibrated on whatever display
+  area the tracker had: with none saved, the init capture's
+  633.6 × 334.3 mm. `--no-display-setup` stays, for the terminal.
+
 ### Changed
 
 - **tobiid warns when the tracker runs on the built-in calibration or
