@@ -2077,6 +2077,7 @@ dependencies = [
 name = "tobii-calib"
 version = "0.4.1"
 dependencies = [
+ "tobii-ipc",
  "tobii-proto",
 ]
 

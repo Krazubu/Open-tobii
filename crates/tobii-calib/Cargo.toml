@@ -7,9 +7,10 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
-# Dependency-free: libtobii.so links this for tobii_calibration_parse and must
-# stay small.
+# Small: libtobii.so links this for tobii_calibration_parse. Its one
+# dependency, for the display area's type, is std-only and linked there too.
 [dependencies]
+tobii-ipc.workspace = true
 
 [dev-dependencies]
 tobii-proto.workspace = true

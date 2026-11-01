@@ -256,7 +256,7 @@ pub(crate) struct State {
     pub(crate) display_override: Option<DisplayArea>,
     /// `TOBII_DISPLAY_MM`: the monitor to configure once the mounting is known.
     pub(crate) display_request: Option<crate::requests::DisplaySize>,
-    /// Where a display area a client sets is saved (see [`crate::display`]);
+    /// Where a display area a client sets is saved (see [`tobii_calib::display`]);
     /// `None` keeps it in memory only.
     pub(crate) display_file: Option<PathBuf>,
     /// The name a client gave the device (or the saved one); `None` until
@@ -1106,7 +1106,7 @@ pub fn run() -> Result<()> {
     let state = Arc::new(Mutex::new(State::new(prewarm)));
     {
         let mut st = lock_state(&state);
-        st.display_file = crate::display::default_path();
+        st.display_file = tobii_calib::display::default_path();
         crate::requests::restore_saved_display_area(&mut st);
         st.name_file = crate::name::default_path();
         crate::name::restore(&mut st);

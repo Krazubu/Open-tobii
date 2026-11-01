@@ -2103,15 +2103,15 @@ pub(crate) mod tests {
 
         assert_eq!(display_writes(&s), 1);
         assert_eq!(lock_state(&s.state).display_override, Some(new));
-        assert_eq!(crate::display::load(&file).expect("load"), Some(new));
+        assert_eq!(tobii_calib::display::load(&file).expect("load"), Some(new));
     }
 
     #[test]
     fn losing_the_engine_mid_session_puts_the_display_configuration_back() {
         let (s, file, old) = display_setup("area-engine");
-        crate::display::save(&file, &area(520.0)).expect("save");
+        tobii_calib::display::save(&file, &area(520.0)).expect("save");
         // The saved area before the change is what goes back to disk.
-        let saved_before = crate::display::load(&file).expect("load");
+        let saved_before = tobii_calib::display::load(&file).expect("load");
         // A new session, with that file in place.
         assert_eq!(
             ask(&s, 1, kind::CALIBRATION_STOP, &[]),
@@ -2126,7 +2126,10 @@ pub(crate) mod tests {
         on_engine_lost(&mut lock_state(&s.state));
 
         assert_eq!(lock_state(&s.state).display_override, Some(old));
-        assert_eq!(crate::display::load(&file).expect("load"), saved_before);
+        assert_eq!(
+            tobii_calib::display::load(&file).expect("load"),
+            saved_before
+        );
     }
 
     #[test]
@@ -2290,7 +2293,7 @@ pub(crate) mod tests {
             Some(&(cmd::WRITE, write_payload(&saved))),
             "the refused write was the saved calibration"
         );
-        assert_eq!(crate::display::load(&file).expect("load"), Some(new));
+        assert_eq!(tobii_calib::display::load(&file).expect("load"), Some(new));
         let st = lock_state(&s.state);
         assert_eq!(st.display_override, Some(new), "the area stays configured");
         assert_eq!(st.calibration.id, None, "unknown once the write failed");
@@ -2683,7 +2686,7 @@ pub(crate) mod tests {
             assert_eq!(st.calibration.id, Some(0x1234_5678));
             assert_eq!(st.calibration.display_access(1), Ok(()), "no orphan mark");
         }
-        assert_eq!(crate::display::load(&file).expect("load"), Some(new));
+        assert_eq!(tobii_calib::display::load(&file).expect("load"), Some(new));
         assert!(stays_quiet(&s));
         assert_eq!(display_writes(&s), 1, "the old area does not go back");
         assert_eq!(announced(&s, 2), [false]);
@@ -2865,7 +2868,7 @@ pub(crate) mod tests {
                 .expect("saved");
             assert_eq!(saved, s.device.blob, "{tag}");
             assert_eq!(
-                crate::display::load(&file).expect("load"),
+                tobii_calib::display::load(&file).expect("load"),
                 Some(new),
                 "{tag}"
             );

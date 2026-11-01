@@ -3,9 +3,11 @@
 //! The Stream Engine keeps a display area set through
 //! `tobii_set_display_area` across sessions, so the daemon does too: every
 //! area a client sets and the device accepts is written to
-//! `display-area` in the per-user Tobii directory, and loaded at start as the
+//! [`FILE_NAME`] in the per-user Tobii directory, and loaded at start as the
 //! area the init replay configures (instead of the Windows capture's,
 //! 633.6 x 334.3 mm). `TOBII_DISPLAY_MM` only applies while nothing is saved.
+//! It lives here, beside the calibration's store, for the clients that read
+//! it too.
 //!
 //! The file is text, three corners in millimetres in the tracker's frame:
 //!
@@ -23,16 +25,19 @@ use std::path::{Path, PathBuf};
 use tobii_ipc::geometry::DisplayArea;
 
 /// File name in the per-user Tobii directory.
-const FILE_NAME: &str = "display-area";
+pub const FILE_NAME: &str = "display-area";
 
-/// Where the display area is saved, if there is a per-user directory.
-pub(crate) fn default_path() -> Option<PathBuf> {
-    tobii_calib::store::config_dir().map(|dir| dir.join(FILE_NAME))
+/// Where the display area is saved, if there is a per-user directory (see
+/// [`crate::store::config_dir`]).
+#[must_use]
+pub fn default_path() -> Option<PathBuf> {
+    crate::store::config_dir().map(|dir| dir.join(FILE_NAME))
 }
 
 /// The file's text for `area`. Values print in their shortest exact form, so
 /// they read back identical.
-pub(crate) fn to_text(area: &DisplayArea) -> String {
+#[must_use]
+pub fn to_text(area: &DisplayArea) -> String {
     let mut s = String::from(
         "# The monitor the eye tracker is mounted on: corners in mm, tracker frame.\n\
          # Written by tobiid whenever a display area is set.\n",
@@ -49,7 +54,8 @@ pub(crate) fn to_text(area: &DisplayArea) -> String {
 
 /// Parse the file's text: each corner exactly once, finite, and a display
 /// with a width and a height.
-pub(crate) fn from_text(text: &str) -> Option<DisplayArea> {
+#[must_use]
+pub fn from_text(text: &str) -> Option<DisplayArea> {
     let (mut tl, mut tr, mut bl) = (None, None, None);
     for line in text.lines().map(str::trim) {
         if line.is_empty() || line.starts_with('#') {
@@ -90,7 +96,7 @@ pub(crate) fn from_text(text: &str) -> Option<DisplayArea> {
 /// # Errors
 ///
 /// When the file exists but cannot be read, or does not hold a display area.
-pub(crate) fn load(path: &Path) -> io::Result<Option<DisplayArea>> {
+pub fn load(path: &Path) -> io::Result<Option<DisplayArea>> {
     let text = match fs::read_to_string(path) {
         Ok(t) => t,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -109,8 +115,8 @@ pub(crate) fn load(path: &Path) -> io::Result<Option<DisplayArea>> {
 /// # Errors
 ///
 /// When the directory or file cannot be written.
-pub(crate) fn save(path: &Path, area: &DisplayArea) -> io::Result<()> {
-    tobii_calib::store::write_atomic(path, to_text(area).as_bytes())
+pub fn save(path: &Path, area: &DisplayArea) -> io::Result<()> {
+    crate::store::write_atomic(path, to_text(area).as_bytes())
 }
 
 #[cfg(test)]
@@ -154,7 +160,7 @@ mod tests {
 
     #[test]
     fn saves_and_loads_through_a_file() {
-        let dir = std::env::temp_dir().join(format!("tobiid-display-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("tobii-calib-display-{}", std::process::id()));
         let path = dir.join(FILE_NAME);
         assert_eq!(load(&path).expect("absent is fine"), None);
         save(&path, &area()).expect("save");
