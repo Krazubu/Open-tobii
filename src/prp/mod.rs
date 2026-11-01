@@ -10,3 +10,11 @@
 //! validates a licence itself.
 
 pub mod wire;
+pub mod server;
+
+#[cfg(windows)]
+#[path = "transport_windows.rs"]
+pub mod transport;
+#[cfg(unix)]
+#[path = "transport_unix.rs"]
+pub mod transport;
