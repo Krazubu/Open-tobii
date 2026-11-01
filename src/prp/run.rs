@@ -9,6 +9,7 @@
 use super::translate::{self, prop, EyeGaze, PropValue};
 use super::transport::PrpClient;
 use super::wire::{op, Message};
+use crate::ttp::calibration::{self, cmd as calcmd};
 use crate::ttp::gaze83::{self, EyeFrame};
 use crate::ttp::session::Session;
 use crate::ttp::{facts, protocol::cmd, protocol::parse_message, protocol::STREAM_ID_GAZE};
@@ -244,10 +245,56 @@ fn handle_command(session: &Session, subs: &Subs, req: &Message) -> Message {
             }
             translate::command_ok_echo(tx, command, arg)
         }
-        // Anything else (calibration, licence retrieve, …): acknowledge for
-        // now so the client is not blocked.
+        // Calibration. Each PRP command maps to its TTP command; the ported
+        // `calibration` module builds the payloads. Best-effort: this path is
+        // validated with PETM driving a real calibration, not locally.
+        9 => calib(session, tx, command, calcmd::CLEAR, &[0, 0]),
+        15 => calib(session, tx, command, calcmd::START, &[0, 0]),
+        11 => {
+            let x = f32::from_bits(req.parts.get(1).and_then(|s| s.word(0)).unwrap_or(0));
+            let y = f32::from_bits(req.parts.get(1).and_then(|s| s.word(1)).unwrap_or(0));
+            let mut payload = vec![0u8, 0];
+            payload.extend_from_slice(&calibration::collect_payload(x, y, calibration::EYES_BOTH));
+            calib(session, tx, command, calcmd::COLLECT_2D, &payload)
+        }
+        16 => calib(session, tx, command, calcmd::COMPUTE, &[0, 0]),
+        17 => calibration_retrieve(session, tx, command),
+        10 => calib(session, tx, command, calcmd::STOP, &[0, 0]),
+        // Anything else (e.g. licence retrieve): acknowledge so the client is
+        // not blocked. The bridge does not validate or forge any licence; the
+        // device streams over TTP without a licence gate.
         _ => translate::command_ok(tx, command),
     }
+}
+
+/// Run a TTP calibration command and acknowledge the PRP command.
+fn calib(session: &Session, tx: u32, prp_cmd: u32, ttp_cmd: u32, payload: &[u8]) -> Message {
+    if let Err(e) = session.command(ttp_cmd, payload) {
+        eprintln!("prp: calibration TTP command {ttp_cmd} failed: {e}");
+    }
+    translate::command_ok(tx, prp_cmd)
+}
+
+/// PRP calibration retrieve: read the active calibration (TTP 1100) and return
+/// its blob as `{size, offset}` + the bytes, as the capture shows.
+fn calibration_retrieve(session: &Session, tx: u32, prp_cmd: u32) -> Message {
+    let blob = session
+        .command(calcmd::READ, &[0, 0])
+        .ok()
+        .and_then(|b| parse_message(&b).and_then(|m| calibration::blob_from_payload(m.payload.get(2..)?).map(<[u8]>::to_vec)))
+        .unwrap_or_default();
+    let mut var = blob;
+    while var.len() % 4 != 0 {
+        var.push(0);
+    }
+    Message::new(
+        tx,
+        op::COMMAND_RESPONSE,
+        vec![
+            super::wire::Struct::new(vec![0, prp_cmd]),
+            super::wire::Struct::with_var(vec![var.len() as u32, 4], var),
+        ],
+    )
 }
 
 /// Start the device's 0x500 gaze stream once; both PRP streams come from it.
