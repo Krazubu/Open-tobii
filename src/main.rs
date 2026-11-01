@@ -38,6 +38,8 @@ mod transport;
 // into the client dispatch.
 #[allow(dead_code)]
 mod prp;
+#[allow(dead_code)]
+mod ttp;
 
 const VID: u16 = 0x2104;
 const PID: u16 = 0x0313;
