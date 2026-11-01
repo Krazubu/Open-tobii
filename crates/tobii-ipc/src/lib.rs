@@ -44,8 +44,9 @@
 //! stream below bit 8, so old and new peers interoperate either way. Raw
 //! gaze, [`STREAM_GAZE_RAW`], is bit 8 and the Stream Engine's head pose,
 //! [`STREAM_HEAD_POSE`], bit 9, both past that byte: a legacy one-byte
-//! SUBSCRIBE (the gaze switcher extension sends one, as clients with their
-//! own copy of this protocol did before `HEAD_POSE`) cannot ask for either. A daemon from before one of them that reads the `u32` mask keeps
+//! SUBSCRIBE (the gaze switcher extension sends one, as does any client with
+//! its own copy of this protocol from before its `u32` mask) cannot ask for
+//! either. A daemon from before one of them that reads the `u32` mask keeps
 //! its bit but never sends its frame, so the stream stays silent:
 //! SUBSCRIBED says ok all the same, and a mask of that bit alone still has
 //! it start and hold the tracker, though one from before the head pose runs
@@ -97,9 +98,9 @@
 //! stays silent until the client asks for `HEAD_POSE` instead. A RECENTER
 //! (an older libtobii's `tobii_recenter`, an older
 //! `tobii-opentrack --recenter`, or such a client's own) is ignored, and the
-//! connection served on. The daemon logs the first of each. A client from after their retirement
-//! neither asks for HEAD nor sends RECENTER, and drops a HEAD frame, should
-//! one come, as a tag it does not know.
+//! connection served on. The daemon logs the first of each. A client from
+//! after their retirement neither asks for HEAD nor sends RECENTER, and drops
+//! a HEAD frame, should one come, as a tag it does not know.
 
 use std::io::{self, Read, Write};
 use std::os::unix::net::UnixStream;

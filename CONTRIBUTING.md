@@ -12,11 +12,14 @@ symbol appears, disappears or stops being declared in the headers, and CI runs
 it on every pull request.
 
 Where an answer cannot be the Stream Engine's, it diverges **deliberately and
-in writing**. [docs/stream-engine-api.md](docs/stream-engine-api.md) says what
-every entry point answers and lists every place where that differs from
-Windows, `tools/abi/README.md` carries the derivation with the DLL addresses it
-came from, and a change that adds a divergence is expected to add its entry.
-"It seemed more sensible" is a reason; it just has to be written down.
+in writing**. For the 153 entry points 4.1 already had,
+[docs/stream-engine-api.md](docs/stream-engine-api.md) says what each answers
+and where that differs from Windows, and `tools/abi/README.md` carries the
+derivation with the DLL addresses it came from. The 46 that 4.25 added, and
+its two renames, are described in `CHANGELOG.md`'s 0.3.0 entry, the README's
+"Limitations" and their doc comments in `crates/tobii-ffi/src/`. A change that
+adds a divergence is expected to add its entry. "It seemed more sensible" is a
+reason; it just has to be written down.
 
 ## Before you open a pull request
 
@@ -53,12 +56,15 @@ A few things the reviewer will look for:
   `0x180000000`) and say whether you read it or inferred it. The existing docs
   do this throughout; it is the only reason they can be checked years later.
 - **The daemon's socket protocol has readers this workspace does not build.**
-  The gaze switcher extension (`gaze-switcher/`) speaks it in GJS, and
-  tobii-hub, a Flutter plugin in its own repository, takes `tobii-ipc` by git
-  at a release tag. `crates/tobii-ipc/tests/out_of_tree_consumers.rs` uses the
-  crate exactly as tobii-hub does, so a change that would break the plugin
-  fails there; `tobii-ipc`'s crate docs say how older and newer peers keep
-  working together.
+  The gaze switcher extension (`gaze-switcher/`) speaks it in GJS; its own
+  tests run with `make -C gaze-switcher test`, which needs gjs, and CI does
+  not run them. tobii-hub, a Flutter plugin in its own repository, takes
+  `tobii-ipc` by git at a release tag.
+  `crates/tobii-ipc/tests/out_of_tree_consumers.rs` imports what tobii-hub
+  imports and decodes frames as its dispatch does, so renaming, retyping or
+  removing one of those items, or adding a field to `HeadPose`, fails there.
+  `tobii-ipc`'s crate docs say how older and newer peers keep working
+  together.
 
 Commit messages are prose, not a change-type prefix: say what changed and
 *why*, and name what you decided against. The log is the project's design
@@ -74,12 +80,14 @@ tested on hardware" is welcome and will simply wait for someone who can run
 it.
 
 **Never add a probe that writes to the tracker without a dry run first.**
-`tobii5-init-replay state-probe` exists for this: a closed list of command
-groups, each write sent with its revert; by default it only prints the bytes,
-`--run` sends them, a write also needs `--allow-writes`, and every reply goes
-to the `--log`. `stream-probe` starts only a stream from the tracker's own
-catalogue and logs everything around it. Extend them rather than writing
-something ad hoc.
+`tobii5-init-replay state-probe` exists for this: a closed whitelist of
+commands, where a write that changes what the tracker reports is refused
+unless its revert is in the same run (the custom command, which changes
+nothing it reports, has none). By default it only prints the bytes;
+`--run` sends them and needs a `--log` to record every message, and a write
+also needs `--allow-writes`. `stream-probe` starts and stops only a stream
+from the tracker's own catalogue (commands 1220 and 1230) and logs everything
+around it. Extend them rather than writing something ad hoc.
 
 ## What is especially welcome
 
