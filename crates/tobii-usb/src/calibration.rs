@@ -178,13 +178,29 @@ pub fn current_blob() -> Result<(Vec<u8>, Source)> {
 pub fn init_packets(display_area: Option<&DisplayArea>) -> Result<Vec<InitPacket>> {
     let mut packets = embedded_packets()?;
     let (blob, source) = current_blob()?;
-    if let Source::File(path) = &source {
-        packets = substitute_calibration(&packets, &blob)?;
-        info!(
-            path = %path.display(),
+    match &source {
+        Source::File(path) => {
+            packets = substitute_calibration(&packets, &blob)?;
+            info!(
+                path = %path.display(),
+                id = tobii_calib::blob::calibration_id(&blob),
+                "calibration: using the saved calibration"
+            );
+        }
+        Source::Embedded
+            if std::env::var_os(store::ENV_OVERRIDE).is_some_and(|v| v == store::EMBEDDED) =>
+        {
+            info!(
+                "calibration: the built-in one, as {}={} asks",
+                store::ENV_OVERRIDE,
+                store::EMBEDDED
+            );
+        }
+        Source::Embedded => warn!(
             id = tobii_calib::blob::calibration_id(&blob),
-            "calibration: using the saved calibration"
-        );
+            "calibration: the built-in one, made for someone else's eyes: gaze on the screen \
+             is off until tobii-calibrate makes yours"
+        ),
     }
     if let Some(area) = display_area {
         packets = substitute_display_area(&packets, area)?;

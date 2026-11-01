@@ -887,6 +887,11 @@ A calibration made with `--no-display-setup`, or before 0.4.1 (whose display
 setup never succeeded), was made on whatever area the tracker had, usually
 the capture's: calibrate again, with the display setup.
 
+Until you calibrate, the daemon's journal says so each time it starts the
+tracker, in two warnings: `calibration: the built-in one, made for someone
+else's eyes` and `display area: the init capture's, not your monitor's`.
+`tobii-calibrate --status` (below) says the same without the journal.
+
 ```bash
 tobii-calibrate                         # display setup, then 14 points; Esc cancels
 tobii-calibrate --list-monitors         # the monitors, and which one it opens on

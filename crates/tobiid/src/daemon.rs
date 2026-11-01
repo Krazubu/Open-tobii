@@ -500,6 +500,18 @@ impl State {
         self.tracker_absence_logged = false;
         self.engine_armed = false;
         self.engine_started_at = Some(now);
+        // Neither saved nor asked for by TOBII_DISPLAY_MM: the init replay
+        // keeps the capture's area. The engine's init says the like of the
+        // calibration.
+        if self.display_override.is_none() && self.display_request.is_none() {
+            let (width_mm, height_mm) = tobii_calib::display::BUILT_IN_MM;
+            warn!(
+                width_mm,
+                height_mm,
+                "display area: the init capture's, not your monitor's: gaze on the screen is \
+                 off until tobii-calibrate sets yours"
+            );
+        }
         #[cfg(not(test))]
         {
             self.engine = Some(Engine::start_seeded(

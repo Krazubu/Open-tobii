@@ -60,6 +60,11 @@ had, and for those 4.25 added in the 0.3.0 entry below and the README's
 
 ### Changed
 
+- **tobiid warns when the tracker runs on the built-in calibration or
+  display area**, each time it starts the tracker: it logged a saved
+  calibration and said nothing of the built-in one. Set
+  `TOBII_CALIBRATION=embedded` and the calibration's line is information
+  instead, since you asked for it.
 - The installers' hints (the packages', `install.sh`'s and the AUR
   recipe's) ask each user who wants gaze on the screen to calibrate, and
   say who does not need to. A release's page now carries its section of
