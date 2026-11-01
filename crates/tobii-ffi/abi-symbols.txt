@@ -1,5 +1,5 @@
 # Every symbol libtobii.so exports, one per line: the 199 exports of
-# tobii_stream_engine.dll 4.1.0.3, and none of our own. `make verify-abi`
+# tobii_stream_engine.dll 4.25.0.3, and none of our own. `make verify-abi`
 # checks the built library against this list, and tools/abi/dll_abi.py checks
 # it against the DLL (it would skip a line marked `# extension` as ours).
 tobii_absolute_eye_openness_subscribe

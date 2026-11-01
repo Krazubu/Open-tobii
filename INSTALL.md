@@ -105,7 +105,7 @@ Produces in `target/release/`:
 | `tobii-opentrack` | thin client: the Stream Engine's head pose → OpenTrack UDP | yes |
 | `tobii-gaze-keys` | thin client: gaze at screen edge → Left/Right arrow key; double wink → Super+Left/Right | yes |
 | `tobii-calibrate` | fullscreen calibration (Wayland and X11) | yes |
-| `libtobii.so` | the Stream Engine 4.1 C ABI, all 153 entry points; a daemon client | yes |
+| `libtobii.so` | the Stream Engine 4.25 C ABI, all 199 entry points; a daemon client | yes |
 | `tobii/*.h` | the C headers for `libtobii.so` (`$PREFIX/include/tobii/`) | yes |
 | `tobii5-init-replay` | log analysis, UVC camera and diagnostics | no — run it from `target/release/` |
 
@@ -130,8 +130,9 @@ embedded assets (it is ~0.45 MB rather than ~20 MB).
 | `tobii-tools` | `tobii5-init-replay`: analysis, UVC camera, diagnostics | all of the above |
 
 `make check` runs what CI would: `cargo fmt --all --check`, clippy with
-`-D warnings` over all targets, the tests and `cargo doc`. `make verify-abi`
-asserts `libtobii.so` exports exactly the 153 symbols listed in
+`-D warnings` over all targets, the tests, `cargo doc`, and the checks of
+the udev rules and the `.desktop` file. `make verify-abi` asserts
+`libtobii.so` exports exactly the 199 symbols listed in
 `crates/tobii-ffi/abi-symbols.txt` (the exports of the reference DLL, and
 none of its own), then compiles and runs `crates/tobii-ffi/abi-smoke.c`
 against the headers so the C declarations and the library cannot drift apart.

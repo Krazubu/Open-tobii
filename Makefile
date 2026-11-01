@@ -73,8 +73,8 @@ THIRD_PARTY ?=
 INCSRC      := crates/tobii-ffi/include
 ABI_SMOKE   := crates/tobii-ffi/abi-smoke.c
 
-# The entry points libtobii.so presents to C — exactly the 153 exports of the
-# Stream Engine 4.1.0.3 DLL — and the headers that declare them are its whole
+# The entry points libtobii.so presents to C — exactly the 199 exports of the
+# Stream Engine 4.25.0.3 DLL — and the headers that declare them are its whole
 # contract with consumers such as OpenTrack's tracker-tobii. `verify-abi`
 # checks both against the built library.
 ABI_LIST    := crates/tobii-ffi/abi-symbols.txt

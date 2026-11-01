@@ -1,10 +1,11 @@
 # The gates every change must pass, on each push to master and each pull
 # request: what `make check` runs locally (rustfmt, clippy with warnings
-# denied, the whole test suite, the docs) and `make verify-abi`, which holds
-# libtobii.so to exactly the 153 entry points of the Stream Engine DLL and
-# compiles a C program against the headers.
+# denied, the whole test suite, the docs, the udev rules and the .desktop
+# file) and `make verify-abi`, which holds libtobii.so to exactly the 199
+# entry points of the Stream Engine 4.25.0.3 DLL and compiles a C program
+# against the headers.
 #
-# No tracker and no daemon are needed: the three tests whose inputs are
+# No tracker and no daemon are needed: the ten tests whose inputs are
 # captures of a face are gated behind env vars (TOBII_IMAGE83_FIXTURE,
 # TOBII_POSE_PGM_FIXTURE) and skip here, and abi-smoke only takes the address
 # of each symbol.
