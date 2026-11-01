@@ -13,7 +13,6 @@ use super::server::{self, ChannelKind};
 use super::wire::{self, Message};
 use std::io;
 use std::ptr::{null, null_mut};
-use std::sync::atomic::{AtomicU64, Ordering};
 use windows_sys::Win32::Foundation::{
     CloseHandle, GetLastError, ERROR_MORE_DATA, ERROR_PIPE_BUSY, ERROR_PIPE_CONNECTED,
     GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE,
@@ -159,25 +158,6 @@ impl Channel {
     }
 }
 
-/// A PRP client's three connections, tied together by the internal endpoints
-/// the command connection minted.
-pub struct PrpClient {
-    pub command: Channel,
-    pub subscription: Channel,
-    pub timesync: Channel,
-    pub pid: u32,
-}
-
-static COUNTER: AtomicU64 = AtomicU64::new(1);
-
-/// Mint a fresh internal endpoint name. A UUID-shaped token is enough; the
-/// client treats it as opaque.
-fn mint_endpoint() -> String {
-    let n = COUNTER.fetch_add(1, Ordering::SeqCst);
-    let pid = std::process::id();
-    format!("tobii-et5-bridge-{pid:08x}-{n:016x}")
-}
-
 /// Read the client's first message and its pid on a freshly connected server
 /// pipe, returning the kind and the client's own pipe name.
 fn read_hello(server: &Pipe) -> io::Result<(ChannelKind, String)> {
@@ -194,71 +174,88 @@ fn read_pid(server: &Pipe) -> io::Result<u32> {
     Ok(u32::from_le_bytes(m[0..4].try_into().unwrap()))
 }
 
-/// The PRP listener: serves `TOBIIPRP-<serial>` and accepts whole clients.
+/// Accept one connection on a freshly made instance of `name`, check its kind,
+/// send `ack`, and read the client's pid. Returns the channel.
+fn accept_one(name: &str, expect: ChannelKind, ack: &[u8]) -> io::Result<Channel> {
+    let server = inbound_instance(name)?;
+    connect(&server)?;
+    let hello = read_message(&server)?;
+    if std::env::var("PRP_DEBUG").is_ok() {
+        eprintln!("accept {name}: hello {} bytes: {:02x?}", hello.len(), &hello[..hello.len().min(16)]);
+    }
+    let (kind, client_name) = server::parse_client_hello(&hello)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "bad PRP hello"))?;
+    if kind != expect {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "unexpected PRP channel kind"));
+    }
+    let debug = std::env::var("PRP_DEBUG").is_ok();
+    let client = match open_for_write(&client_name) {
+        Ok(c) => c,
+        Err(e) => {
+            if debug {
+                eprintln!("accept {name}: open client pipe '{client_name}' failed: {e}");
+            }
+            return Err(e);
+        }
+    };
+    if debug {
+        eprintln!("accept {name}: client pipe opened");
+    }
+    // Order from the capture: server writes the `u32 1` success word, then the
+    // client writes its pid, then the server writes the rest of the ack (the
+    // internal endpoints for the command channel; a trailing word otherwise).
+    write_all(&client, &ack[..4])?;
+    let pid = read_pid(&server)?;
+    if ack.len() > 4 {
+        write_all(&client, &ack[4..])?;
+    }
+    if debug {
+        eprintln!("accept {name}: pid {pid:#x} — handshake complete");
+    }
+    Ok(Channel { server, client, inbox: Vec::new() })
+}
+
+/// The PRP listener. The three channels are independent connections: PETM
+/// opens the command channel alone to discover the device, and only opens the
+/// subscription and time sync channels when it starts using it. So each is
+/// accepted on its own, never waiting on the others. The internal endpoints
+/// have fixed names (one PETM at a time), sent in every command
+/// acknowledgement.
 pub struct Listener {
-    name: String,
+    main_name: String,
+    sub_name: String,
+    ts_name: String,
 }
 
 impl Listener {
     pub fn bind(serial: &str) -> io::Result<Self> {
-        let name = format!("TOBIIPRP-{serial}");
-        // Fail now if the name is taken.
-        drop(inbound_instance(&name)?);
-        Ok(Listener { name })
+        let main_name = format!("TOBIIPRP-{serial}");
+        drop(inbound_instance(&main_name)?); // fail now if the name is taken
+        Ok(Listener {
+            main_name,
+            sub_name: format!("tobii-et5-bridge-{serial}-sub"),
+            ts_name: format!("tobii-et5-bridge-{serial}-ts"),
+        })
     }
 
     pub fn describe(&self) -> String {
-        format!(r"\\.\pipe\{}", self.name)
+        format!(r"\\.\pipe\{}", self.main_name)
     }
 
-    /// Accept one command connection and complete the whole client handshake:
-    /// mint the two internal endpoints, serve them, and wait for the client's
-    /// subscription and time sync connections. Returns the three channels.
-    pub fn accept(&self) -> io::Result<PrpClient> {
-        // Command connection on the main pipe.
-        let cmd_server = inbound_instance(&self.name)?;
-        connect(&cmd_server)?;
-        let (kind, cmd_client_name) = read_hello(&cmd_server)?;
-        if kind != ChannelKind::Command {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "first PRP connection is not the command channel"));
-        }
+    /// Accept one command connection (the acknowledgement names the internal
+    /// subscription and time sync endpoints). Fast: it never waits for the
+    /// other two channels, so discovery probes are served at once.
+    pub fn accept_command(&self) -> io::Result<Channel> {
+        accept_one(&self.main_name, ChannelKind::Command, &server::command_ack(&self.sub_name, &self.ts_name))
+    }
 
-        // Mint and pre-create the two internal pipes before naming them, so
-        // the client can connect the instant it reads the acknowledgement.
-        let sub_name = mint_endpoint();
-        let ts_name = mint_endpoint();
-        let sub_server = inbound_instance(&sub_name)?;
-        let ts_server = inbound_instance(&ts_name)?;
+    /// Accept one subscription connection; the stream forwarder writes to it.
+    pub fn accept_sub(&self) -> io::Result<Channel> {
+        accept_one(&self.sub_name, ChannelKind::Subscription, &server::subscription_ack())
+    }
 
-        let cmd_client = open_for_write(&cmd_client_name)?;
-        write_all(&cmd_client, &server::command_ack(&sub_name, &ts_name))?;
-        let pid = read_pid(&cmd_server)?;
-
-        // Subscription connection.
-        connect(&sub_server)?;
-        let (k, sub_client_name) = read_hello(&sub_server)?;
-        if k != ChannelKind::Subscription {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "expected the subscription channel"));
-        }
-        let sub_client = open_for_write(&sub_client_name)?;
-        write_all(&sub_client, &server::subscription_ack())?;
-        let _ = read_pid(&sub_server)?;
-
-        // Time sync connection.
-        connect(&ts_server)?;
-        let (k, ts_client_name) = read_hello(&ts_server)?;
-        if k != ChannelKind::Timesync {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "expected the time sync channel"));
-        }
-        let ts_client = open_for_write(&ts_client_name)?;
-        write_all(&ts_client, &server::timesync_ack())?;
-        let _ = read_pid(&ts_server)?;
-
-        Ok(PrpClient {
-            command: Channel { server: cmd_server, client: cmd_client, inbox: Vec::new() },
-            subscription: Channel { server: sub_server, client: sub_client, inbox: Vec::new() },
-            timesync: Channel { server: ts_server, client: ts_client, inbox: Vec::new() },
-            pid,
-        })
+    /// Accept one time sync connection.
+    pub fn accept_timesync(&self) -> io::Result<Channel> {
+        accept_one(&self.ts_name, ChannelKind::Timesync, &server::timesync_ack())
     }
 }

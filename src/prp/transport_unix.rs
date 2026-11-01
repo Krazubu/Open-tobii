@@ -10,34 +10,37 @@
 use super::wire::Message;
 use std::io;
 
+fn unsupported<T>() -> io::Result<T> {
+    Err(io::Error::new(io::ErrorKind::Unsupported, "PRP is not supported on this platform yet"))
+}
+
 pub struct Channel;
 
 impl Channel {
     pub fn read_frame(&mut self) -> io::Result<Message> {
-        Err(io::Error::new(io::ErrorKind::Unsupported, "PRP is not supported on this platform yet"))
+        unsupported()
     }
     pub fn write_frame(&self, _msg: &Message) -> io::Result<()> {
-        Err(io::Error::new(io::ErrorKind::Unsupported, "PRP is not supported on this platform yet"))
+        unsupported()
     }
-}
-
-pub struct PrpClient {
-    pub command: Channel,
-    pub subscription: Channel,
-    pub timesync: Channel,
-    pub pid: u32,
 }
 
 pub struct Listener;
 
 impl Listener {
     pub fn bind(_serial: &str) -> io::Result<Self> {
-        Err(io::Error::new(io::ErrorKind::Unsupported, "PRP is not supported on this platform yet"))
+        unsupported()
     }
     pub fn describe(&self) -> String {
         String::new()
     }
-    pub fn accept(&self) -> io::Result<PrpClient> {
-        Err(io::Error::new(io::ErrorKind::Unsupported, "PRP is not supported on this platform yet"))
+    pub fn accept_command(&self) -> io::Result<Channel> {
+        unsupported()
+    }
+    pub fn accept_sub(&self) -> io::Result<Channel> {
+        unsupported()
+    }
+    pub fn accept_timesync(&self) -> io::Result<Channel> {
+        unsupported()
     }
 }

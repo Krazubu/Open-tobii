@@ -191,22 +191,9 @@ fn prp_server() {
     };
     log!("listening on {} (clients see tobii-prp://{serial})", listener.describe());
 
-    for n in 0.. {
-        match listener.accept() {
-            Ok(client) => {
-                log!("prp client {n}: connected (pid {:#x})", client.pid);
-                let session = session.clone();
-                let props = props.clone();
-                thread::spawn(move || {
-                    prp::run::serve(session, client, props);
-                    log!("prp client {n}: gone");
-                });
-            }
-            Err(e) => {
-                log!("prp accept failed: {e}");
-                thread::sleep(Duration::from_millis(200));
-            }
-        }
+    if let Err(e) = prp::run::run_server(session, listener, props) {
+        log!("prp server stopped: {e}");
+        std::process::exit(1);
     }
 }
 

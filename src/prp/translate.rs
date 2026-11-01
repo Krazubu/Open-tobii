@@ -7,15 +7,17 @@
 use super::wire::{op, Message, Struct};
 
 /// The connect response is a nested capabilities document. Rather than rebuild
-/// that format, the bridge replays the one the device's own runtime produced
+/// that format, the bridge replays the ones the device's own runtime produced
 /// (captured from this ET5): its stream and property lists are exactly the
-/// device's. Only the transaction id is swapped to match the request.
-pub fn connect_response(transaction: u32) -> Message {
-    const TEMPLATE: &str = include_str!("../../assets/prp_connect_response.hex");
-    let bytes: Vec<u8> = {
-        let hex = TEMPLATE.trim();
-        (0..hex.len()).step_by(2).map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap()).collect()
-    };
+/// device's. PETM makes two kinds of connect — a light discovery connect (no
+/// licence) and, once it shows the device, a full one (with its licence) — and
+/// the runtime answers each differently, so the bridge replays the matching
+/// one. Only the transaction id is swapped.
+pub fn connect_response(transaction: u32, full: bool) -> Message {
+    const DISCOVERY: &str = include_str!("../../assets/prp_connect_response_discovery.hex");
+    const FULL: &str = include_str!("../../assets/prp_connect_response.hex");
+    let hex = if full { FULL } else { DISCOVERY }.trim();
+    let bytes: Vec<u8> = (0..hex.len()).step_by(2).map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap()).collect();
     let (mut msg, _) = super::wire::parse_frame(&bytes).expect("built-in connect template parses");
     msg.transaction = transaction;
     msg
@@ -177,11 +179,10 @@ mod tests {
 
     #[test]
     fn connect_template_roundtrips() {
-        // Rebuilding the template with its own transaction id reproduces the
+        // Rebuilding each template with its own transaction id reproduces the
         // captured frame exactly.
-        let bytes = write_frame(&connect_response(1));
-        let want = hex(include_str!("../../assets/prp_connect_response.hex").trim());
-        assert_eq!(bytes, want);
+        assert_eq!(write_frame(&connect_response(1, true)), hex(include_str!("../../assets/prp_connect_response.hex").trim()));
+        assert_eq!(write_frame(&connect_response(1, false)), hex(include_str!("../../assets/prp_connect_response_discovery.hex").trim()));
     }
 
     #[test]

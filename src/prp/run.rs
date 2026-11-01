@@ -6,16 +6,16 @@
 //! calibration and licence forwarding are not here yet; their requests are
 //! acknowledged so the client is not left waiting.
 
+use super::transport::{Channel, Listener};
 use super::translate::{self, prop, EyeGaze, PropValue};
-use super::transport::PrpClient;
 use super::wire::{op, Message};
 use crate::ttp::calibration::{self, cmd as calcmd};
 use crate::ttp::gaze83::{self, EyeFrame};
 use crate::ttp::session::Session;
 use crate::ttp::{facts, protocol::cmd, protocol::parse_message, protocol::STREAM_ID_GAZE};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use std::time::Instant;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 /// Which streams the client is subscribed to.
 #[derive(Default)]
@@ -24,6 +24,10 @@ struct Subs {
     position: AtomicBool,
     device_started: AtomicBool,
 }
+
+/// The subscription channel the stream forwarder writes to, when a client has
+/// opened one.
+type SubSink = Arc<Mutex<Option<Channel>>>;
 
 /// The property values PETM reads, filled from the device at start-up.
 #[derive(Debug, Clone)]
@@ -94,26 +98,57 @@ impl Properties {
     }
 }
 
-/// Serve one PRP client: the command channel (connection, property reads and
-/// subscriptions, commands) and the time sync channel. Blocks until the
-/// command channel closes.
-pub fn serve(session: Arc<Session>, client: PrpClient, props: Arc<Properties>) {
-    let PrpClient { mut command, subscription, mut timesync, .. } = client;
+/// Run the PRP server: accept command connections (each served on its own
+/// thread) and, in the background, the subscription and time sync channels and
+/// the gaze-stream forwarder. The three channels are independent, so discovery
+/// (command only) is never held up by the others. Loops forever.
+pub fn run_server(session: Arc<Session>, listener: Listener, props: Arc<Properties>) -> std::io::Result<()> {
+    let listener = Arc::new(listener);
     let subs = Arc::new(Subs::default());
+    let sink: SubSink = Arc::new(Mutex::new(None));
 
-    // Forward device gaze frames to the subscription channel, re-encoded as
-    // the PRP streams the client asked for.
+    // Subscription channel: accept it and keep the latest as the stream sink.
+    {
+        let (listener, sink) = (listener.clone(), sink.clone());
+        std::thread::spawn(move || loop {
+            match listener.accept_sub() {
+                Ok(ch) => *sink.lock().unwrap() = Some(ch),
+                Err(_) => std::thread::sleep(Duration::from_millis(200)),
+            }
+        });
+    }
+
+    // Time sync channel: answer timestamp requests.
+    {
+        let listener = listener.clone();
+        std::thread::spawn(move || loop {
+            match listener.accept_timesync() {
+                Ok(ch) => serve_timesync(ch),
+                Err(_) => std::thread::sleep(Duration::from_millis(200)),
+            }
+        });
+    }
+
+    // Forwarder: decode device gaze and write the subscribed PRP streams to
+    // the current subscription sink.
     if let Some(rx) = session.take_streams() {
-        let subs = subs.clone();
+        let (subs, sink) = (subs.clone(), sink.clone());
         std::thread::spawn(move || {
-            let sub = subscription;
             for msg in rx {
                 let Some(parsed) = parse_message(&msg) else { continue };
                 if parsed.id != STREAM_ID_GAZE {
                     continue;
                 }
                 let Some(frame) = gaze83::decode_gaze_frame(&parsed) else { continue };
-                if subs.gaze.load(Ordering::Relaxed) {
+                let gaze = subs.gaze.load(Ordering::Relaxed);
+                let position = subs.position.load(Ordering::Relaxed);
+                if !gaze && !position {
+                    continue;
+                }
+                let mut guard = sink.lock().unwrap();
+                let Some(ch) = guard.as_ref() else { continue };
+                let mut ok = true;
+                if gaze {
                     let g = translate::advanced_gaze(
                         frame.device_ts_us,
                         &eye_gaze(&frame.left),
@@ -121,11 +156,9 @@ pub fn serve(session: Arc<Session>, client: PrpClient, props: Arc<Properties>) {
                         frame.left.tracked,
                         frame.right.tracked,
                     );
-                    if sub.write_frame(&g).is_err() {
-                        break;
-                    }
+                    ok &= ch.write_frame(&g).is_ok();
                 }
-                if subs.position.load(Ordering::Relaxed) {
+                if ok && position {
                     let p = translate::user_position_guide(
                         frame.device_ts_us,
                         frame.left.position_guide.valid,
@@ -133,55 +166,62 @@ pub fn serve(session: Arc<Session>, client: PrpClient, props: Arc<Properties>) {
                         frame.right.position_guide.valid,
                         f3(frame.right.position_guide.value),
                     );
-                    if sub.write_frame(&p).is_err() {
-                        break;
-                    }
+                    ok &= ch.write_frame(&p).is_ok();
+                }
+                if !ok {
+                    *guard = None; // sink gone; wait for the next subscription
                 }
             }
         });
     }
 
-    // Time sync on its own thread: answer timestamp requests with a device
-    // time. Approximate for now (a monotonic microsecond counter); the real
-    // device clock comes with the stream work.
-    std::thread::spawn(move || {
-        let start = Instant::now();
-        while let Ok(req) = timesync.read_frame() {
-            if req.operation == op::COMMAND_REQUEST {
-                let us = start.elapsed().as_micros() as u32;
-                let resp = Message::new(
-                    req.transaction,
-                    op::COMMAND_RESPONSE,
-                    vec![super::wire::Struct::new(vec![0, cmd_id(&req)]), super::wire::Struct::new(vec![us])],
-                );
-                if timesync.write_frame(&resp).is_err() {
-                    break;
-                }
+    // Command channels: one PETM opens many (discovery), then a lasting one.
+    // A failed accept (a probe that closed mid-handshake) must not stop the
+    // server — log and carry on.
+    loop {
+        match listener.accept_command() {
+            Ok(ch) => {
+                let (session, props, subs) = (session.clone(), props.clone(), subs.clone());
+                std::thread::spawn(move || serve_command(ch, &session, &props, &subs));
+            }
+            Err(e) => {
+                eprintln!("prp: command accept failed: {e}");
+                std::thread::sleep(Duration::from_millis(50));
             }
         }
-    });
+    }
+}
 
+/// Serve one command connection until it closes.
+fn serve_command(mut command: Channel, session: &Session, props: &Properties, subs: &Subs) {
+    let debug = std::env::var("PRP_DEBUG").is_ok();
     loop {
         let req = match command.read_frame() {
             Ok(r) => r,
-            Err(_) => break,
+            Err(e) => {
+                if debug {
+                    eprintln!("cmd: channel closed ({e})");
+                }
+                break;
+            }
         };
+        if debug {
+            let detail = if req.operation == op::COMMAND_REQUEST { cmd_id(&req) } else { property_of(&req) };
+            eprintln!("cmd: op {} detail {}", req.operation, detail);
+        }
         let tx = req.transaction;
         let resp = match req.operation {
             op::PROPERTY_GET_REQUEST => {
                 let property = property_of(&req);
-                match props.value(property) {
-                    Some(v) => translate::property_get_response(tx, property, &v),
-                    None => translate::property_get_response(tx, property, &PropValue::U32(0)),
-                }
+                let v = props.value(property).unwrap_or(PropValue::U32(0));
+                translate::property_get_response(tx, property, &v)
             }
             op::PROPERTY_ENUMERATE_REQUEST => {
                 let property = property_of(&req);
-                // The device offers a single output frequency.
                 let vals = props.value(property).into_iter().collect::<Vec<_>>();
                 translate::property_enumerate_response(tx, property, &vals)
             }
-            op::COMMAND_REQUEST => handle_command(&session, &subs, &req),
+            op::COMMAND_REQUEST => handle_command(session, subs, &req),
             other => {
                 eprintln!("prp: unhandled operation {other}");
                 continue;
@@ -189,6 +229,24 @@ pub fn serve(session: Arc<Session>, client: PrpClient, props: Arc<Properties>) {
         };
         if command.write_frame(&resp).is_err() {
             break;
+        }
+    }
+}
+
+/// Answer timestamp requests on a time sync channel until it closes.
+fn serve_timesync(mut ch: Channel) {
+    let start = Instant::now();
+    while let Ok(req) = ch.read_frame() {
+        if req.operation == op::COMMAND_REQUEST {
+            let us = start.elapsed().as_micros() as u32;
+            let resp = Message::new(
+                req.transaction,
+                op::COMMAND_RESPONSE,
+                vec![super::wire::Struct::new(vec![0, cmd_id(&req)]), super::wire::Struct::new(vec![us])],
+            );
+            if ch.write_frame(&resp).is_err() {
+                break;
+            }
         }
     }
 }
@@ -212,7 +270,17 @@ fn handle_command(session: &Session, subs: &Subs, req: &Message) -> Message {
         // The licence PETM sent is not acted on yet (it is never blanked or
         // forged); forwarding it to the device comes with the calibration
         // work.
-        1 => translate::connect_response(tx),
+        1 => {
+            // PETM sends a light discovery connect first (no licence, small),
+            // then a full one carrying its licence (a large variable area).
+            // The runtime answers each differently; match it by the request's
+            // size.
+            let full = req.parts.iter().map(|s| s.var.len()).sum::<usize>() > 2000;
+            if std::env::var("PRP_DEBUG").is_ok() {
+                eprintln!("connect: {} (var {} bytes)", if full { "full" } else { "discovery" }, req.parts.iter().map(|s| s.var.len()).sum::<usize>());
+            }
+            translate::connect_response(tx, full)
+        }
         // Property notification start: acknowledge the subscription. Later
         // changes (e.g. calibration id) are pushed on the subscription
         // channel once notification forwarding lands.
@@ -325,6 +393,10 @@ fn eye_gaze(e: &EyeFrame) -> EyeGaze {
 
 fn f3(v: [f64; 3]) -> [f32; 3] {
     [v[0] as f32, v[1] as f32, v[2] as f32]
+}
+
+fn hex(b: &[u8]) -> String {
+    b.iter().map(|x| format!("{x:02x}")).collect()
 }
 
 /// The single `u32` argument of a command (its second struct's first field).
