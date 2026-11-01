@@ -117,7 +117,7 @@ From source:
 
 ```bash
 cargo build --release --workspace     # or: make build
-make install                          # binaries + libtobii.so + headers + udev rules + desktop entry + user units
+make install                          # binaries + libtobii.so + headers + udev rules + desktop entries + user units
 make enable                           # start the daemon now
 tobii-calibrate                       # calibrate for your eyes (once)
 ```

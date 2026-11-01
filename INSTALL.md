@@ -68,7 +68,8 @@ The `.deb` and `.rpm` install under `/usr` (the library in
 `/usr/lib/x86_64-linux-gnu` or `/usr/lib64`, the rules in
 `/usr/lib/udev/rules.d`, the units in `/usr/lib/systemd/user`); the tarball
 installs under `/usr/local` (the rules in `/etc/udev/rules.d`, plus
-`/etc/ld.so.conf.d/tobii.conf`). Do not mix either with `make install` (§2b):
+`/etc/ld.so.conf.d/tobii.conf`). All of them put the reminder to calibrate
+(§8a) in `/etc/xdg/autostart`. Do not mix either with `make install` (§2b):
 its binaries in `/usr/local/bin` and its units in `~/.config/systemd/user` win
 over a package's. Run `make uninstall` first.
 
@@ -147,12 +148,13 @@ prototype against the DLL's machine code (`tools/abi/README.md`).
 The fastest path — installs binaries + `libtobii.so` to `/usr/local` (plus
 `/etc/ld.so.conf.d/tobii.conf`, so the dynamic loader finds the library
 where it does not search `/usr/local/lib` by itself, e.g. Fedora), the udev
-rules, the desktop entry and icon of `tobii-calibrate`, and the systemd
-**user** units (with `ExecStart` rewritten to the installed binary). Run it as
-**your user**; it invokes `sudo` for the system parts itself:
+rules, the desktop entry and icon of `tobii-calibrate` and its reminder's
+autostart entry (in `/etc/xdg/autostart`, §8a), and the systemd **user**
+units (with `ExecStart` rewritten to the installed binary). Run it as **your
+user**; it invokes `sudo` for the system parts itself:
 
 ```bash
-make install      # build + binaries + lib + udev rules + desktop entry + user units
+make install      # build + binaries + lib + udev rules + desktop entries + user units
 make enable       # start the always-on user service now
 ```
 
