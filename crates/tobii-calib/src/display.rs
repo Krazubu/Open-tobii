@@ -91,6 +91,17 @@ pub fn from_text(text: &str) -> Option<DisplayArea> {
         .then_some(area)
 }
 
+/// The display's width and height in mm: the lengths of its top and left
+/// edges.
+#[must_use]
+pub fn size_mm(area: &DisplayArea) -> (f64, f64) {
+    let span = |a: [f64; 3], b: [f64; 3]| (0..3).map(|i| (a[i] - b[i]).powi(2)).sum::<f64>().sqrt();
+    (
+        span(area.top_left_mm, area.top_right_mm),
+        span(area.top_left_mm, area.bottom_left_mm),
+    )
+}
+
 /// Read the area saved at `path`; `Ok(None)` when there is none.
 ///
 /// # Errors
@@ -139,6 +150,14 @@ mod tests {
     fn the_text_reads_back_exactly() {
         let a = area();
         assert_eq!(from_text(&to_text(&a)), Some(a));
+    }
+
+    #[test]
+    fn the_size_is_the_monitor_the_area_was_computed_for() {
+        let (width, height) = size_mm(&area());
+
+        assert!((width - 597.0).abs() < 1e-9, "{width}");
+        assert!((height - 336.0).abs() < 1e-9, "{height}");
     }
 
     #[test]

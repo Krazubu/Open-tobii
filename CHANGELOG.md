@@ -30,6 +30,18 @@ had, and for those 4.25 added in the 0.3.0 entry below and the README's
   looking at the left and right edges reads about 0.08 and 0.92, on a 49"
   32:9 one about −0.44 and 1.44.
 
+### Added
+
+- **`tobii-calibrate` opens on the tracker's monitor more often, and Tab
+  moves it.** Without `--monitor` it took the primary monitor, which Wayland
+  does not name to programs, so it opened on the first monitor listed. It
+  now opens on the monitor the last calibration was made on (kept in
+  `~/.config/tobii/calibration-monitor`), else on the one the saved display
+  area fits by its EDID, else as before; and until the display setup is
+  answered, Tab (Shift+Tab: back) moves it to the next monitor, the setup
+  starting again there. `--list-monitors` shows each monitor's size and the
+  one it would open on.
+
 ### Changed
 
 - The installers' hints (the packages', `install.sh`'s and the AUR

@@ -887,9 +887,19 @@ setup never succeeded), was made on whatever area the tracker had, usually
 the capture's: calibrate again, with the display setup.
 
 ```bash
-tobii-calibrate --list-monitors         # which monitor is the tracker on?
-tobii-calibrate --monitor 0             # display setup, then 14 points; Esc cancels
+tobii-calibrate                         # display setup, then 14 points; Esc cancels
+tobii-calibrate --list-monitors         # the monitors, and which one it opens on
+tobii-calibrate --monitor 1             # on that one
 ```
+
+Without `--monitor` it opens on the monitor the last calibration was made
+on (kept in `~/.config/tobii/calibration-monitor`), else on the one whose
+size, from its EDID, is the saved display area's, else on the primary
+monitor — on Wayland, which names none to programs, the first one
+`--list-monitors` lists. If the tracker is not on that monitor, press Tab
+(Shift+Tab: back) on the first screens: the window moves to the next
+monitor, and the display setup starts again there. Once the setup is
+answered, the calibration belongs to its monitor and Tab no longer moves it.
 
 First the display setup: two white ticks at the bottom edge of the screen,
 to be lined up with the two white marks on the tracker's front (drag them,

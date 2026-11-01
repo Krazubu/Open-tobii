@@ -9,11 +9,17 @@
 //! the calibration and uploads it at every later start; `--reset` goes back
 //! to the calibration built into the driver.
 //!
+//! The window opens on the monitor the last calibration was made on, else
+//! the one the saved display area was set up on (else the primary one, else
+//! the first); until the display setup is answered, Tab moves it to the next
+//! one.
+//!
 //! Talks to the daemon directly over its socket, like the other clients.
 
 mod draw;
 mod edid;
 mod ipc;
+mod remembered;
 mod sequence;
 mod setup;
 mod ui;
@@ -30,13 +36,15 @@ use anyhow::{Context, Result, bail};
 use winit::event_loop::EventLoop;
 
 use crate::sequence::{Backend, DryRun, SavedNotTaken, Summary, Timing, UiEvent};
-use crate::ui::{MonitorChoice, Signals, Ui};
+use crate::ui::{MonitorChoice, Remembered, Signals, Ui};
 
 const USAGE: &str = "\
 usage: tobii-calibrate [options]
 
   --monitor N|NAME   calibrate on this monitor (see --list-monitors);
-                     default: the primary one
+                     default: the one last calibrated on, else the one the
+                     saved display area fits, else the primary one; Tab
+                     moves to the next one until the display setup is done
   --list-monitors    print the monitors and exit
   --no-display-setup keep the display area the tracker has (skip lining up
                      the ticks with the marks on the tracker)
@@ -120,6 +128,19 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Options> {
         bail!("--windowed only goes with --dry-run: a calibration needs the whole monitor");
     }
     Ok(o)
+}
+
+/// The size of the display area the daemon has saved, if one is: the
+/// window opens by default on the monitor it was set up on.
+fn saved_area_mm() -> Option<(f64, f64)> {
+    let path = tobii_calib::display::default_path()?;
+    match tobii_calib::display::load(&path) {
+        Ok(area) => area.as_ref().map(tobii_calib::display::size_mm),
+        Err(e) => {
+            tracing::debug!(path = %path.display(), error = %e, "no saved display area to go by");
+            None
+        }
+    }
 }
 
 /// `--reset`: have the daemon upload the built-in calibration and forget the
@@ -276,6 +297,12 @@ fn outcome(
     }
 }
 
+/// Whether the worker reports a calibration tobiid saved, whether the
+/// tracker took it at once or takes it at its next start.
+fn was_saved(worker: &Result<Result<(), Failure>, mpsc::RecvTimeoutError>) -> bool {
+    matches!(worker, Ok(Ok(()) | Err(Failure { saved: true, .. })))
+}
+
 /// The window's own failure (no such monitor, no window), which the
 /// terminal says before [`outcome`]: the worker then only saw the abort
 /// that followed it. Not over a calibration tobiid saved, which the worker
@@ -364,10 +391,15 @@ fn run() -> Result<()> {
         timing,
         o.verify,
         answers,
-    );
+    )
+    .with_remembered(Remembered {
+        monitor: remembered::monitor(),
+        area_mm: saved_area_mm(),
+    });
     event_loop.run_app(&mut app).context("window event loop")?;
     let window_failed = app.failed.take();
     let escaped = app.escaped;
+    let calibrated_on = app.monitor_name().map(str::to_owned);
     // Close the window now, not after the wait below.
     drop(app);
     // Esc or a closed window: have the worker stop the session (it checks
@@ -381,6 +413,13 @@ fn run() -> Result<()> {
     });
     if let Some(reason) = window_failure(window_failed, &worker) {
         bail!(reason);
+    }
+    // The next calibration opens on the monitor of the one tobiid saved.
+    if !o.dry_run
+        && was_saved(&worker)
+        && let Some(name) = &calibrated_on
+    {
+        remembered::remember(name);
     }
     // Relaxed: a pure signal from the worker.
     outcome(
@@ -569,6 +608,17 @@ mod tests {
         let err = err.to_string();
         assert!(err.contains("finishes the save"), "{err}");
         assert!(err.contains("not exported to cal.bin"), "{err}");
+    }
+
+    #[test]
+    fn only_a_saved_calibration_is_remembered_by_its_monitor() {
+        let refused = Failure::new("refused".into());
+
+        assert!(was_saved(&Ok(Ok(()))));
+        assert!(was_saved(&Ok(saved_not_taken(None))));
+        assert!(!was_saved(&Ok(Err(refused))));
+        assert!(!was_saved(&Err(mpsc::RecvTimeoutError::Timeout)));
+        assert!(!was_saved(&Err(mpsc::RecvTimeoutError::Disconnected)));
     }
 
     #[test]
