@@ -302,9 +302,8 @@ fn modified(path: &Path) -> Option<SystemTime> {
 }
 
 fn calibration() -> Calibration {
-    let chosen = std::env::var_os(store::ENV_OVERRIDE).is_some_and(|v| v == store::EMBEDDED);
     match store::configured() {
-        Location::Embedded if chosen => Calibration::BuiltInChosen,
+        Location::Embedded if store::embedded_chosen() => Calibration::BuiltInChosen,
         Location::Embedded => Calibration::BuiltIn { path: None },
         Location::File(path) => match store::load(&path) {
             Ok(Some((_, info))) => Calibration::Own {

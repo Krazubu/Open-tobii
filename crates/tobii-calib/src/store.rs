@@ -45,6 +45,14 @@ pub fn configured() -> Location {
     )
 }
 
+/// Whether the user asked for the built-in calibration
+/// (`TOBII_CALIBRATION=embedded`), rather than having none of their own:
+/// both are [`Location::Embedded`] or a file that is not there.
+#[must_use]
+pub fn embedded_chosen() -> bool {
+    std::env::var_os(ENV_OVERRIDE).is_some_and(|v| v == EMBEDDED)
+}
+
 fn locate(overridden: Option<OsString>, xdg: Option<OsString>, home: Option<OsString>) -> Location {
     if let Some(value) = overridden.filter(|s| !s.is_empty()) {
         return if value == EMBEDDED {

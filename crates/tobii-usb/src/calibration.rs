@@ -187,9 +187,7 @@ pub fn init_packets(display_area: Option<&DisplayArea>) -> Result<Vec<InitPacket
                 "calibration: using the saved calibration"
             );
         }
-        Source::Embedded
-            if std::env::var_os(store::ENV_OVERRIDE).is_some_and(|v| v == store::EMBEDDED) =>
-        {
+        Source::Embedded if store::embedded_chosen() => {
             info!(
                 "calibration: the built-in one, as {}={} asks",
                 store::ENV_OVERRIDE,
