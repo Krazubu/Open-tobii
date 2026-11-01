@@ -417,6 +417,12 @@ impl Ui {
                 self.epoch += 1;
                 self.request_frame();
             }
+            // Fullscreen on the monitor Tab moved it to: its own setup, once.
+            // Not at a resize: a move between monitors of one size has none,
+            // and the window may learn its new monitor only after it.
+            if std::mem::take(&mut self.setup_stale) {
+                self.refresh_setup();
+            }
             return None;
         };
         if let Some(last) = self.placement_last
@@ -1288,11 +1294,6 @@ impl ApplicationHandler<UiEvent> for Ui {
             WindowEvent::Resized(_) => {
                 // Whatever the window held may be gone: repaint all of it.
                 self.presented = None;
-                // Fullscreen on the monitor Tab moved it to: its own setup.
-                if self.setup_stale && self.misplaced_now().is_none() {
-                    self.setup_stale = false;
-                    self.refresh_setup();
-                }
                 self.request_frame();
             }
             _ => {}
