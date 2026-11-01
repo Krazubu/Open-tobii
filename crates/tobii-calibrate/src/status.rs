@@ -3,13 +3,16 @@
 //! whether it is plugged in. `--status` prints it, and `--remind` reminds of
 //! what is missing for gaze on the screen.
 //!
-//! Everything is read from the files tobiid reads and from sysfs. Nothing
-//! here connects to the daemon, which would start it and open the tracker.
+//! Everything is read from the files tobiid reads, in the environment
+//! systemd starts it with, and from sysfs. Nothing here connects to the
+//! daemon, which would start it and open the tracker.
 
+use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use tobii_calib::display;
@@ -21,6 +24,9 @@ const USB_DEVICES: &str = "/sys/bus/usb/devices";
 /// The Eye Tracker 5 on the bus, as sysfs spells it.
 const VENDOR: &str = "2104";
 const PRODUCT: &str = "0313";
+
+/// The variable that gives tobiid a display area while none is saved.
+const DISPLAY_MM: &str = "TOBII_DISPLAY_MM";
 
 /// How much later than the calibration the display area may be saved and
 /// still count as the one it was made on: a session that is kept saves
@@ -64,15 +70,30 @@ pub(crate) enum Area {
     },
 }
 
+/// Where the variables tobiid reads were taken from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EnvSource {
+    /// systemd's account of what it starts tobiid with (see
+    /// [`daemon_environment`]).
+    Systemd,
+    /// This process's own: systemd did not answer.
+    ThisProcess,
+}
+
 /// What tobiid starts the tracker with, as far as this process can tell.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Status {
     pub(crate) calibration: Calibration,
     pub(crate) area: Area,
-    /// `TOBII_CALIBRATION` here; tobiid reads its own environment.
+    /// `TOBII_CALIBRATION` as tobiid gets it.
     pub(crate) calibration_env: Option<OsString>,
-    /// `TOBII_DISPLAY_MM` here; tobiid reads its own environment.
+    /// `TOBII_DISPLAY_MM` as tobiid gets it.
     pub(crate) display_env: Option<String>,
+    /// Where those were taken from.
+    pub(crate) env_source: EnvSource,
+    /// Those two as this process has them where tobiid does not, or not
+    /// alike: `NAME=value`.
+    pub(crate) here_only: Vec<String>,
     /// The tracker's place on the USB bus (`1-10.1`), if it is plugged in.
     pub(crate) tracker: Option<String>,
 }
@@ -89,22 +110,43 @@ pub(crate) enum Missing {
 }
 
 impl Status {
-    /// Read it all now.
+    /// Read it all now, in the environment tobiid gets from systemd (this
+    /// process's, if systemd does not say).
     pub(crate) fn read() -> Self {
-        let non_empty = |v: &OsString| !v.is_empty();
+        let daemon = daemon_environment();
+        let env_source = if daemon.is_some() {
+            EnvSource::Systemd
+        } else {
+            EnvSource::ThisProcess
+        };
+        let var = |name: &str| {
+            match &daemon {
+                Some(env) => env.get(name).cloned(),
+                None => std::env::var_os(name),
+            }
+            .filter(|v| !v.is_empty())
+        };
+        let here_only = [store::ENV_OVERRIDE, DISPLAY_MM]
+            .into_iter()
+            .filter_map(|name| {
+                let here = std::env::var_os(name).filter(|v| !v.is_empty())?;
+                (var(name).as_ref() != Some(&here))
+                    .then(|| format!("{name}={}", here.to_string_lossy()))
+            })
+            .collect();
         Self {
-            calibration: calibration(),
-            area: area(),
-            calibration_env: std::env::var_os(store::ENV_OVERRIDE).filter(non_empty),
-            display_env: std::env::var("TOBII_DISPLAY_MM")
-                .ok()
-                .filter(|v| !v.is_empty()),
+            calibration: calibration(&var),
+            area: area(&var),
+            calibration_env: var(store::ENV_OVERRIDE),
+            display_env: var(DISPLAY_MM).map(|v| v.to_string_lossy().into_owned()),
+            env_source,
+            here_only,
             tracker: tracker_on_bus(Path::new(USB_DEVICES)),
         }
     }
 
     /// What is missing for gaze on the screen, if anything. A display area
-    /// `TOBII_DISPLAY_MM` gives is taken to reach the daemon too.
+    /// `TOBII_DISPLAY_MM` gives tobiid counts as one.
     pub(crate) fn missing(&self) -> Option<Missing> {
         match (&self.calibration, &self.area) {
             (Calibration::BuiltIn { .. } | Calibration::Unusable { .. }, _) => {
@@ -152,24 +194,30 @@ impl Status {
             |at| format!("plugged in (USB {at})"),
         );
         line(&mut out, "tracker", &tracker);
+        let from = match self.env_source {
+            EnvSource::Systemd => "tobiid gets it",
+            EnvSource::ThisProcess => "here; systemd does not say what tobiid gets",
+        };
         if let Some(value) = &self.calibration_env {
             let value = value.to_string_lossy();
             line(
                 &mut out,
                 "environment",
-                &format!(
-                    "{}={value} here; tobiid goes by its own",
-                    store::ENV_OVERRIDE
-                ),
+                &format!("{}={value} ({from})", store::ENV_OVERRIDE),
             );
         }
         if let Some(value) = &self.display_env {
             line(
                 &mut out,
                 "environment",
-                &format!(
-                    "TOBII_DISPLAY_MM={value} here; tobiid uses its own while no area is saved"
-                ),
+                &format!("{DISPLAY_MM}={value} ({from}; it counts while no area is saved)"),
+            );
+        }
+        for here in &self.here_only {
+            line(
+                &mut out,
+                "environment",
+                &format!("{here} here, which tobiid does not get"),
             );
         }
         let advice = match self.missing() {
@@ -301,9 +349,112 @@ fn modified(path: &Path) -> Option<SystemTime> {
     fs::metadata(path).and_then(|m| m.modified()).ok()
 }
 
-fn calibration() -> Calibration {
-    match store::configured() {
-        Location::Embedded if store::embedded_chosen() => Calibration::BuiltInChosen,
+/// The environment tobiid gets from systemd, which starts it: the user
+/// manager's, with tobiid.service's own `Environment=` over it (where
+/// INSTALL.md §7 sets the daemon's variables, `systemctl --user edit
+/// tobiid`). Asking starts nothing. `None` when systemctl does not answer;
+/// an `EnvironmentFile=` is not read.
+fn daemon_environment() -> Option<HashMap<String, OsString>> {
+    let ask = |args: &[&str]| {
+        Command::new("systemctl")
+            .arg("--user")
+            .args(args)
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+    };
+    let mut env: HashMap<String, OsString> = ask(&["show-environment"])?
+        .lines()
+        .filter_map(manager_assignment)
+        .collect();
+    if let Some(unit) = ask(&[
+        "show",
+        "--property=Environment",
+        "--value",
+        "tobiid.service",
+    ]) {
+        env.extend(unit_words(&unit).into_iter().filter_map(|word| {
+            let (name, value) = word.split_once('=')?;
+            Some((name.to_owned(), OsString::from(value)))
+        }));
+    }
+    Some(env)
+}
+
+/// A `NAME=value` line of `systemctl show-environment`, which writes a
+/// value with whitespace or shell characters in it as `$'...'`, C-escaped.
+fn manager_assignment(line: &str) -> Option<(String, OsString)> {
+    let (name, value) = line.split_once('=')?;
+    let value = match value.strip_prefix("$'").and_then(|v| v.strip_suffix('\'')) {
+        Some(quoted) => unescape(quoted),
+        None => value.to_owned(),
+    };
+    Some((name.to_owned(), value.into()))
+}
+
+/// The C escapes systemd writes; any other backslash stays as written.
+fn unescape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('n') => out.push('\n'),
+            Some('t') => out.push('\t'),
+            Some(e @ ('\\' | '\'' | '"')) => out.push(e),
+            Some(other) => {
+                out.push('\\');
+                out.push(other);
+            }
+            None => out.push('\\'),
+        }
+    }
+    out
+}
+
+/// The words of `systemctl show --property=Environment --value`: the
+/// assignments, space-separated, each with a space or a quote in it in
+/// double quotes, backslash-escaped inside.
+fn unit_words(text: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut word = String::new();
+    // Inside quotes; a word whose quotes held nothing is still a word.
+    let (mut quoted, mut started) = (false, false);
+    let mut chars = text.trim().chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => {
+                quoted = !quoted;
+                started = true;
+            }
+            '\\' if quoted => word.extend(chars.next()),
+            c if c.is_whitespace() && !quoted => {
+                if started {
+                    words.push(std::mem::take(&mut word));
+                    started = false;
+                }
+            }
+            c => {
+                word.push(c);
+                started = true;
+            }
+        }
+    }
+    if started {
+        words.push(word);
+    }
+    words
+}
+
+fn calibration(var: &impl Fn(&str) -> Option<OsString>) -> Calibration {
+    match store::configured_by(var) {
+        Location::Embedded if store::embedded_chosen_by(var) => Calibration::BuiltInChosen,
         Location::Embedded => Calibration::BuiltIn { path: None },
         Location::File(path) => match store::load(&path) {
             Ok(Some((_, info))) => Calibration::Own {
@@ -321,8 +472,8 @@ fn calibration() -> Calibration {
     }
 }
 
-fn area() -> Area {
-    let Some(path) = display::default_path() else {
+fn area(var: &impl Fn(&str) -> Option<OsString>) -> Area {
+    let Some(path) = store::config_dir_by(var).map(|dir| dir.join(display::FILE_NAME)) else {
         return Area::BuiltIn { path: None };
     };
     match display::load(&path) {
@@ -386,6 +537,8 @@ mod tests {
             area,
             calibration_env: None,
             display_env: None,
+            env_source: EnvSource::Systemd,
+            here_only: Vec::new(),
             tracker: Some("1-10.1".into()),
         }
     }
@@ -469,6 +622,45 @@ mod tests {
         assert_eq!(at("/home/someone-else/x"), "/home/someone-else/x");
         assert_eq!(at("/etc/tobii"), "/etc/tobii");
         assert_eq!(home_relative(Path::new("/x"), None), "/x");
+    }
+
+    #[test]
+    fn the_daemons_variables_are_read_as_systemd_writes_them() {
+        assert_eq!(
+            manager_assignment("TOBII_DISPLAY_MM=597x336"),
+            Some(("TOBII_DISPLAY_MM".into(), "597x336".into()))
+        );
+        assert_eq!(
+            manager_assignment(r"TOBII_CALIBRATION=$'/home/a b/it\'s.bin'"),
+            Some(("TOBII_CALIBRATION".into(), "/home/a b/it's.bin".into()))
+        );
+        assert_eq!(manager_assignment("no assignment"), None);
+        // As `systemctl show -p Environment --value` prints a unit's.
+        assert_eq!(
+            unit_words(r#"A=1 "B=x y" "C=q\"z" D="#),
+            ["A=1", "B=x y", r#"C=q"z"#, "D="]
+        );
+        assert_eq!(unit_words("\n"), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_variable_tobiid_does_not_get_is_told_apart() {
+        let mut pre_041 = status(own(0), built_in_area());
+        pre_041.here_only = vec!["TOBII_DISPLAY_MM=597x336".into()];
+
+        let report = pre_041.report();
+
+        assert_eq!(pre_041.missing(), Some(Missing::DisplayArea));
+        assert!(
+            report.contains("TOBII_DISPLAY_MM=597x336 here, which tobiid does not get"),
+            "{report}"
+        );
+        pre_041.display_env = Some("597x336".into());
+        assert!(
+            pre_041.report().contains("(tobiid gets it;"),
+            "{}",
+            pre_041.report()
+        );
     }
 
     #[test]

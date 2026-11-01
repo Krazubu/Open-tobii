@@ -38,11 +38,14 @@ pub enum Location {
 /// The configured location, from the environment.
 #[must_use]
 pub fn configured() -> Location {
-    locate(
-        std::env::var_os(ENV_OVERRIDE),
-        std::env::var_os("XDG_CONFIG_HOME"),
-        std::env::var_os("HOME"),
-    )
+    configured_by(|name: &str| std::env::var_os(name))
+}
+
+/// [`configured`] in the environment `var` gives (a variable's value by
+/// name): where another process, such as the daemon, finds the calibration.
+#[must_use]
+pub fn configured_by(var: impl Fn(&str) -> Option<OsString>) -> Location {
+    locate(var(ENV_OVERRIDE), var("XDG_CONFIG_HOME"), var("HOME"))
 }
 
 /// Whether the user asked for the built-in calibration
@@ -50,7 +53,13 @@ pub fn configured() -> Location {
 /// both are [`Location::Embedded`] or a file that is not there.
 #[must_use]
 pub fn embedded_chosen() -> bool {
-    std::env::var_os(ENV_OVERRIDE).is_some_and(|v| v == EMBEDDED)
+    embedded_chosen_by(|name: &str| std::env::var_os(name))
+}
+
+/// [`embedded_chosen`] in the environment `var` gives.
+#[must_use]
+pub fn embedded_chosen_by(var: impl Fn(&str) -> Option<OsString>) -> bool {
+    var(ENV_OVERRIDE).is_some_and(|v| v == EMBEDDED)
 }
 
 fn locate(overridden: Option<OsString>, xdg: Option<OsString>, home: Option<OsString>) -> Location {
@@ -71,10 +80,13 @@ fn locate(overridden: Option<OsString>, xdg: Option<OsString>, home: Option<OsSt
 /// is set.
 #[must_use]
 pub fn config_dir() -> Option<PathBuf> {
-    tobii_dir(
-        std::env::var_os("XDG_CONFIG_HOME"),
-        std::env::var_os("HOME"),
-    )
+    config_dir_by(|name: &str| std::env::var_os(name))
+}
+
+/// [`config_dir`] in the environment `var` gives.
+#[must_use]
+pub fn config_dir_by(var: impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
+    tobii_dir(var("XDG_CONFIG_HOME"), var("HOME"))
 }
 
 fn tobii_dir(xdg: Option<OsString>, home: Option<OsString>) -> Option<PathBuf> {
@@ -252,6 +264,15 @@ mod tests {
             Location::File("/h/.config/tobii/calibration.bin".into())
         );
         assert_eq!(locate(None, None, None), Location::Embedded);
+        let daemons = |name: &str| match name {
+            ENV_OVERRIDE => os("/d/c.bin"),
+            "HOME" => os("/h"),
+            _ => None,
+        };
+        assert_eq!(configured_by(daemons), Location::File("/d/c.bin".into()));
+        assert!(!embedded_chosen_by(daemons));
+        assert!(embedded_chosen_by(|_| os(EMBEDDED)));
+        assert_eq!(config_dir_by(daemons), Some("/h/.config/tobii".into()));
         assert_eq!(tobii_dir(None, os("/h")), Some("/h/.config/tobii".into()));
         assert_eq!(tobii_dir(os("/x"), os("/h")), Some("/x/tobii".into()));
     }

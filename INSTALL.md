@@ -963,8 +963,11 @@ whether the daemon still saves the calibration (the save was under way;
   one, your display area or the built-in 633.6 × 334.3 mm, and whether the
   tracker is plugged in, then what, if anything, to do about it (calibrate;
   calibrate again with the display setup; calibrate again because the
-  display area changed since). It reads the files tobiid reads, so it
-  starts no daemon and opens no tracker.
+  display area changed since). It reads the files tobiid reads, in the
+  environment systemd gives tobiid (the user manager's, and
+  `Environment=` lines from `systemctl --user edit tobiid`), and says so
+  when your shell has `TOBII_CALIBRATION` or `TOBII_DISPLAY_MM` and tobiid
+  does not. It starts no daemon and opens no tracker.
 - `--remind` is what the desktop runs at every login
   (`/etc/xdg/autostart/tobii-calibrate-remind.desktop`). With the tracker
   plugged in and no calibration of yours, or one but no display area saved
@@ -976,8 +979,9 @@ whether the daemon still saves the calibration (the save was under way;
   a week after that. It needs `notify-send` with buttons (libnotify 0.7.10
   or later, `libnotify-bin` on Debian and Ubuntu); an older one, or
   `busctl` without it, shows the text without buttons. It stays quiet in a
-  greeter's or other non-user session, and while `TOBII_CALIBRATION` is
-  set. What it has shown is kept in `~/.config/tobii/reminders`: delete the
+  greeter's or other non-user session, and while tobiid gets
+  `TOBII_CALIBRATION`; a `TOBII_DISPLAY_MM` that tobiid gets counts as a
+  display area. What it has shown is kept in `~/.config/tobii/reminders`: delete the
   file to be reminded again. To turn it off for one user without the button,
   give them a copy with `Hidden=true` in `~/.config/autostart/`; for every
   user, delete the system file (a package upgrade may bring it back).

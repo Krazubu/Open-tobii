@@ -508,6 +508,13 @@ pub(crate) fn run() -> Result<()> {
     }
     thread::sleep(SETTLE);
     let status = Status::read();
+    if status.calibration_env.is_some() {
+        tracing::info!(
+            "tobiid gets {}: the calibration is the user's business",
+            store::ENV_OVERRIDE
+        );
+        return Ok(());
+    }
     let Some(missing) = status.missing() else {
         tracing::debug!("nothing to remind of");
         return Ok(());
