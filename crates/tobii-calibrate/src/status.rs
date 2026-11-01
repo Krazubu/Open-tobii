@@ -201,12 +201,12 @@ impl Status {
             Calibration::BuiltIn { path } => {
                 let none_at = path
                     .as_ref()
-                    .map_or_else(String::new, |p| format!(" (none at {})", p.display()));
+                    .map_or_else(String::new, |p| format!(" (none at {})", shown(p)));
                 format!("the built-in one, the author's{none_at}")
             }
             Calibration::Unusable { path, why } => format!(
                 "the built-in one, the author's: {} is skipped ({why})",
-                path.display()
+                shown(path)
             ),
             Calibration::Own {
                 path,
@@ -216,7 +216,7 @@ impl Status {
             } => format!(
                 "yours: id {id}, {points} points{} ({})",
                 saved_on(*saved),
-                path.display()
+                shown(path)
             ),
         }
     }
@@ -228,11 +228,11 @@ impl Status {
             Area::BuiltIn { path } => {
                 let none_at = path
                     .as_ref()
-                    .map_or_else(String::new, |p| format!(" (none at {})", p.display()));
+                    .map_or_else(String::new, |p| format!(" (none at {})", shown(p)));
                 format!("{built_in}, not your monitor's{none_at}")
             }
             Area::Unusable { path, why } => {
-                format!("{built_in}: {} is skipped ({why})", path.display())
+                format!("{built_in}: {} is skipped ({why})", shown(path))
             }
             Area::Saved {
                 path,
@@ -242,9 +242,23 @@ impl Status {
                 "yours: {w:.1} x {h:.1} mm ({}\"){} ({})",
                 inches(*w, *h),
                 saved_on(*saved),
-                path.display()
+                shown(path)
             ),
         }
+    }
+}
+
+/// `path` as the report shows it: under the home directory as `~/...`,
+/// so that a report pasted into an issue does not carry the user's name.
+fn shown(path: &Path) -> String {
+    let home = std::env::var_os("HOME").filter(|h| !h.is_empty());
+    home_relative(path, home.as_deref().map(Path::new))
+}
+
+fn home_relative(path: &Path, home: Option<&Path>) -> String {
+    match home.and_then(|h| path.strip_prefix(h).ok()) {
+        Some(rest) => format!("~/{}", rest.display()),
+        None => path.display().to_string(),
     }
 }
 
@@ -253,7 +267,7 @@ fn inches(w: f64, h: f64) -> String {
     format!("{:.1}", w.hypot(h) / 25.4)
 }
 
-/// ", saved <date>" for a file's time, if it has one.
+/// `, saved YYYY-MM-DD` for a file's time, if it has one.
 fn saved_on(saved: Option<SystemTime>) -> String {
     saved
         .and_then(date)
@@ -442,6 +456,20 @@ mod tests {
         assert!(done.contains("plugged in (USB 1-10.1)"), "{done}");
         assert!(!done.contains("to do"), "{done}");
         assert!(stale.contains("run tobii-calibrate again"), "{stale}");
+    }
+
+    #[test]
+    fn paths_under_home_are_shown_from_it() {
+        let home = Path::new("/home/someone");
+        let at = |p: &str| home_relative(Path::new(p), Some(home));
+
+        assert_eq!(
+            at("/home/someone/.config/tobii/display-area"),
+            "~/.config/tobii/display-area"
+        );
+        assert_eq!(at("/home/someone-else/x"), "/home/someone-else/x");
+        assert_eq!(at("/etc/tobii"), "/etc/tobii");
+        assert_eq!(home_relative(Path::new("/x"), None), "/x");
     }
 
     #[test]
