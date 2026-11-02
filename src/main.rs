@@ -250,35 +250,83 @@ fn ttp_probe() {
     }
     // Start the gaze stream and watch it for several seconds: does the device
     // stream 0x500 continuously with our driving?
+    // Start the image stream 0x50e first, as the Windows Stream Engine and
+    // tobii-linux do: on the ET5 this appears to drive the camera and its IR
+    // illuminators, without which no eye can be tracked (all gaze sentinel).
+    match session.start_stream(ttp::protocol::STREAM_ID_IMAGE) {
+        Ok(()) => log!("image stream 0x50e started"),
+        Err(e) => log!("image stream 0x50e start failed: {e}"),
+    }
     let _ = session.start_stream(ttp::protocol::STREAM_ID_GAZE);
+    let _ = session.start_stream(ttp::protocol::STREAM_ID_PRESENCE);
     let Some(rx) = streams else { return };
     let start = Instant::now();
-    let (mut gaze, mut other, mut shown) = (0u64, 0u64, false);
+    let (mut gaze, mut other, mut valid) = (0u64, 0u64, 0u64);
     let mut by_id: std::collections::BTreeMap<u32, u64> = std::collections::BTreeMap::new();
-    while start.elapsed() < Duration::from_secs(8) {
+    let (mut gaze_dumped, mut pres_dumped) = (0u32, 0u32);
+    log!(">>> WATCH THE TRACKER NOW: do the red LEDs light up? (20s) <<<");
+    while start.elapsed() < Duration::from_secs(20) {
         match rx.recv_timeout(Duration::from_millis(500)) {
             Ok(msg) => {
                 let Some(m) = parse_message(&msg) else { continue };
                 *by_id.entry(m.id).or_default() += 1;
                 if m.id == ttp::protocol::STREAM_ID_GAZE {
                     gaze += 1;
-                    if !shown {
-                        if let Some(g) = ttp::gaze83::decode_gaze_frame(&m) {
-                            let l = &g.left;
-                            log!("first gaze t={}us Lpoint valid={} ({:.3},{:.3}) pupil={:.2}", g.device_ts_us, l.gaze_point_norm.valid, l.gaze_point_norm.value[0], l.gaze_point_norm.value[1], l.pupil_diameter_mm.value);
-                            shown = true;
+                    if let Some(g) = ttp::gaze83::decode_gaze_frame(&m) {
+                        // Count frames where the device actually tracked an eye.
+                        if g.left.gaze_point_norm.valid || g.right.gaze_point_norm.valid || g.left.pupil_diameter_mm.valid {
+                            valid += 1;
                         }
+                    }
+                    // Dump the raw keyed fields of the first few gaze frames so
+                    // we can see what the device actually reports (validity keys,
+                    // pupil status) rather than trust the decoder's summary.
+                    if gaze_dumped < 3 {
+                        gaze_dumped += 1;
+                        dump_keyed("gaze 0x500", m.payload);
                     }
                 } else {
                     other += 1;
+                    if m.id == ttp::protocol::STREAM_ID_PRESENCE && pres_dumped < 2 {
+                        pres_dumped += 1;
+                        dump_keyed("presence 0x504", m.payload);
+                    }
                 }
             }
             Err(_) => {}
         }
     }
     let secs = start.elapsed().as_secs_f64();
-    log!("over {secs:.1}s: {gaze} gaze (0x500) = {:.1}/s, {other} other", gaze as f64 / secs);
+    log!("over {secs:.1}s: {gaze} gaze = {:.1}/s, {valid} VALID (eye tracked), {other} other", gaze as f64 / secs);
     log!("by stream id: {by_id:?}");
+}
+
+/// Dump a stream message's keyed fields: every scalar key present (as hex
+/// bits, plus its 16.16 value), points marked, and the raw payload hex. Lets
+/// us read the device's own validity/status words directly.
+fn dump_keyed(label: &str, payload: &[u8]) {
+    use ttp::tlv::{KeyedValue, keyed_fields};
+    let f = keyed_fields(payload);
+    let mut scalars = Vec::new();
+    let mut points = Vec::new();
+    for k in 0u32..0x30 {
+        match f.get(k) {
+            Some(KeyedValue::Scalar { typ, bits }) => {
+                let fx = f.fixed16(k).map(|v| format!("={v:.3}")).unwrap_or_default();
+                scalars.push(format!("{k:#04x}:t{typ}={bits:#x}{fx}"));
+            }
+            Some(KeyedValue::Point { id, raw, len }) => {
+                points.push(format!("{k:#04x}:pt{id:#x}[{}]{:?}", len, &raw[..len.min(3)]));
+            }
+            None => {}
+        }
+    }
+    log!("{label} ({} B): scalars {}", payload.len(), scalars.join(" "));
+    if !points.is_empty() {
+        log!("{label} points: {}", points.join(" "));
+    }
+    let hex: String = payload.iter().take(160).map(|b| format!("{b:02x}")).collect();
+    log!("{label} hex[..160]: {hex}");
 }
 
 fn open_device() -> rusb::Result<DeviceHandle<GlobalContext>> {
