@@ -35,10 +35,13 @@ const DEVICE_URL: &std::ffi::CStr = c"tobii-ffi://tobiid";
 /// on it (4.x has the four-argument `tobii_device_create`).
 ///
 /// 4.25.0.3 since the whole of its export surface is here — all 199 entry
-/// points, against 4.1.0.3's 153 — and the two structs that differ between
-/// the versions follow 4.25 as well. What 4.25 adds over 4.1 and an ET5
-/// cannot answer is refused, as the DLL itself refuses it for a tracker it
-/// drives without the Tobii service; the README lists those.
+/// points, against 4.1.0.3's 153 — and of the three structs this library
+/// declares that are known to differ between the versions, two follow 4.25
+/// as well, `tobii_gaze_raw_t` and `tobii_wearable_advanced_data_t`, while
+/// `tobii_hardware_configuration_t` keeps 4.1.0.3's two entries and 2472
+/// bytes where 4.25.0.3's holds four (3960 bytes, inferred). What 4.25 adds
+/// over 4.1 and an ET5 cannot answer is refused, as the DLL itself refuses it
+/// for a tracker it drives without the Tobii service; the README lists those.
 const API_VERSION: Version = Version {
     major: 4,
     minor: 25,
@@ -47,7 +50,7 @@ const API_VERSION: Version = Version {
 };
 
 /// `tobii_get_api_version`: 4.25.0.3, the version written as four `uint32_t`
-/// the DLL writes it as (0x18007f1a0 in 4.25: major 4, minor 0x19, revision
+/// the DLL writes it as (0x180082e60 in 4.25: major 4, minor 0x19, revision
 /// 0, build 3).
 ///
 /// # Safety
@@ -924,7 +927,8 @@ pub unsafe extern "C" fn tobii_capability_supported(
 }
 
 /// Whether a stream is available: gaze point, gaze origin, eye position,
-/// presence, head pose, gaze data and the user position guide.
+/// presence, head pose, gaze data, the user position guide and the
+/// responsive gaze point Stream Engine 4.25 adds (12).
 ///
 /// This follows what libtobii delivers, not the DLL, which answers from what
 /// the device reports (its stream lists and capability flags): its TTP path
@@ -932,9 +936,10 @@ pub unsafe extern "C" fn tobii_capability_supported(
 /// lists the compound stream `USER_POSITION_GUIDE_XYZ`, and its answer for 6,
 /// 7 and 9..=11 depends on the device too. Here those are unsupported because
 /// their subscribes refuse them (6 and 9..=11 as the DLL does for an ET5) or
-/// are stubs (7). As in the DLL, a value of 12 or more is
-/// reported unsupported, not an error, and a value above `i32::MAX` (a
-/// negative `tobii_stream_t`) is an invalid parameter.
+/// are stubs (7). As in the DLL, a value of 13 or more is reported
+/// unsupported, not an error (4.25's check, 0x18009137a, takes 0..=12; 4.1's
+/// stopped at 11), and a value above `i32::MAX` (a negative `tobii_stream_t`)
+/// is an invalid parameter.
 ///
 /// # Safety
 /// As `tobii_capability_supported`.

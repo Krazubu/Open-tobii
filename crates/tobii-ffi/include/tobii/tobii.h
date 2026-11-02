@@ -1,16 +1,24 @@
-/* tobii/tobii.h — the core of the Tobii Stream Engine 4.1 C API, as provided
+/* tobii/tobii.h — the core of the Tobii Stream Engine 4.25 C API, as provided
  * by libtobii.so.
  *
  * Not Tobii's header: an independent declaration of the same interface, so
  * code written against the Stream Engine builds and links unchanged on Linux.
  * Signatures, enum values and struct layouts are those of the reference
- * tobii_stream_engine.dll 4.1.0.3 (see tools/abi/README.md for how each was
- * established). libtobii.so exports all 153 of its entry points and no
- * other; the ones marked NOT IMPLEMENTED return TOBII_ERROR_NOT_SUPPORTED.
+ * tobii_stream_engine.dll 4.25.0.3 but for tobii_hardware_configuration_t
+ * (tobii_internal.h), which keeps 4.1.0.3's two entries and 2472 bytes where
+ * 4.25.0.3's holds four (3960 bytes, inferred). Those 4.25 shares with
+ * 4.1.0.3 were established on 4.1.0.3 (see tools/abi/README.md); of the
+ * shared records these headers declare, 4.25 is known to have enlarged
+ * three: tobii_gaze_raw_t (tobii_internal.h) and
+ * tobii_wearable_advanced_data_t (tobii_wearable.h), which they follow, and
+ * tobii_hardware_configuration_t, which they do not. What 4.25 adds is
+ * derived where it is declared, here and in crates/tobii-ffi/src/.
+ * libtobii.so exports all 199 of its entry points and no other.
  *
  * The companion headers follow the Stream Engine's split: tobii_streams.h,
  * tobii_config.h, tobii_licensing.h, tobii_advanced.h, tobii_wearable.h, and
- * tobii_internal.h for the exports the Stream Engine never documented.
+ * tobii_internal.h for the exports the Stream Engine never documented;
+ * tobii_signing.h declares the four signing calls 4.25 adds.
  *
  * Threads: as the Stream Engine promises, the functions may be called from
  * several threads at once, on one device too. A device's state is locked by
@@ -300,7 +308,7 @@ typedef enum tobii_stream_t
  * call, on any thread, rewrites, as in the DLL. */
 TOBII_API char const* TOBII_CALL tobii_error_message( tobii_error_t error );
 
-/* 4.1.0.3: the version this library imitates. */
+/* 4.25.0.3: the version this library imitates. */
 TOBII_API tobii_error_t TOBII_CALL tobii_get_api_version( tobii_version_t* version );
 
 TOBII_API tobii_error_t TOBII_CALL tobii_api_create( tobii_api_t** api,
@@ -459,10 +467,10 @@ TOBII_API tobii_error_t TOBII_CALL tobii_warnings_unsubscribe( tobii_device_t* d
 TOBII_API tobii_error_t TOBII_CALL tobii_capability_supported( tobii_device_t* device,
     tobii_capability_t capability, tobii_supported_t* supported );
 /* Supported: GAZE_POINT, GAZE_ORIGIN, EYE_POSITION_NORMALIZED, USER_PRESENCE,
- * HEAD_POSE, GAZE_DATA, USER_POSITION_GUIDE: the streams libtobii.so
- * delivers. Any other value, including one above WEARABLE_FOVEATED_GAZE, is
- * reported unsupported, not an error; a negative value is
- * TOBII_ERROR_INVALID_PARAMETER. */
+ * HEAD_POSE, GAZE_DATA, USER_POSITION_GUIDE and 12, the responsive gaze point
+ * (tobii_streams.h): the streams libtobii.so delivers. Any other value,
+ * including one above 12, is reported unsupported, not an error; a negative
+ * value is TOBII_ERROR_INVALID_PARAMETER. */
 TOBII_API tobii_error_t TOBII_CALL tobii_stream_supported( tobii_device_t* device,
     tobii_stream_t stream, tobii_supported_t* supported );
 

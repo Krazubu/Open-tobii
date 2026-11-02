@@ -1,18 +1,16 @@
 /* tobii/tobii_internal.h — the exports of tobii_stream_engine.dll 4.1.0.3
- * that the Stream Engine never documented, as provided by libtobii.so.
+ * that the Stream Engine never documented (two of them under the names
+ * 4.25.0.3 gave them, tobii_multiple_faces_subscribe and _unsubscribe), and
+ * 27 of the 46 entry points 4.25.0.3 adds, as provided by libtobii.so.
  *
  * Argument counts are those the DLL's code reads (tools/abi/dll_abi.py);
- * argument types are best guesses. Only the field-of-use, image, raw gaze,
- * foveated rendering gaze point, custom stream, image collection,
- * internal-stream, internal-capability, timesync, stream-type, stream-column,
- * pause, hardware-configuration and internal device-info functions are
- * implemented, and tobii_calibration_stimulus_points_get, the subscribes and
- * unsubscribes of internal streams 3, 4, 5, 7 and 8, the face id calls,
- * tobii_send_statistics and tobii_set_display_info check their arguments
- * before they answer, as the DLL does, and tobii_set_fw_upgrade_allowed
- * answers TOBII_ERROR_NOT_SUPPORTED as the DLL does, checking nothing; every
- * other entry point here returns TOBII_ERROR_NOT_SUPPORTED without reading its
- * arguments, so the guessed types cannot matter at runtime.
+ * argument types are best guesses where nothing here reads them. The entry
+ * points libtobii.so implements read their arguments typed as the DLL takes
+ * them (tobii_hardware_configuration_get as 4.1.0.3 takes its record; see
+ * there), and tobii_send_statistics reads its two strings; every other entry
+ * point here at most compares its pointers with null before it answers, and
+ * tobii_open_realm its key_size with zero as a signed word, as the DLL does,
+ * so the guessed types cannot matter at runtime.
  * Companion to tobii/tobii.h and tobii/tobii_streams.h.
  *
  * SPDX-License-Identifier: MIT
@@ -590,9 +588,13 @@ TOBII_API tobii_error_t TOBII_CALL tobii_pause_device( tobii_device_t* device );
 TOBII_API tobii_error_t TOBII_CALL tobii_resume_device( tobii_device_t* device );
 
 /* PROVISIONAL. The tracker's hardware configuration (its command 2120). The
- * layout is the DLL's (2472 bytes; offsets from its copy at 0x18014abe0 and
+ * layout is 4.1.0.3's (2472 bytes; offsets from its copy at 0x18014abe0 and
  * its PRP deserialiser at 0x180045056, which load the 64-bit fields as
  * double); the field names are ours, and what the fields mean is not known.
+ * 4.25.0.3's record holds four entries (its deserialiser clamps the count at
+ * 4, 0x180201237, where 4.1.0.3's clamps it at 2, 0x18004506d): its copy
+ * (0x1800772c0) puts point_count at +0xba8, points_xyz from +0xbb0 and mode
+ * at +0xf70, so it is 3960 bytes (inferred). This header keeps 4.1.0.3's.
  * The values come from the one answer ever captured (Windows): 16.16 values
  * unscaled, 32.32 values scaled as lengths, in mm. On Linux the ET5 has so
  * far answered 2120 with no data, so the call returns
@@ -749,10 +751,12 @@ TOBII_API tobii_error_t TOBII_CALL tobii_set_face_id_parameters( tobii_device_t*
  * converts silently; in C++ the void pointer is an error. */
 TOBII_API tobii_error_t TOBII_CALL tobii_send_statistics( tobii_device_t* device, char const* a, char const* b );
 /* TOBII_ERROR_INVALID_PARAMETER for a null device or display_info, and
- * otherwise always TOBII_ERROR_NOT_SUPPORTED, display_info unread, as the DLL
- * answers on every path. It checks for no callback, so a call from inside
- * one gets the same answers. The DLL's getter fills 72 bytes, a 64-byte string
- * and two ints, whose meaning is not known. */
+ * otherwise always TOBII_ERROR_NOT_SUPPORTED, display_info unread, as Stream
+ * Engine 4.1 answers on every path. It checks for no callback, so a call from
+ * inside one gets the same answers; 4.25 answers such a call
+ * TOBII_ERROR_CALLBACK_IN_PROGRESS once both pointers check out, which this
+ * library does not. The DLL's getter fills 72 bytes, a 64-byte string and two
+ * ints, whose meaning is not known. */
 TOBII_API tobii_error_t TOBII_CALL tobii_set_display_info( tobii_device_t* device, void const* display_info );
 /* Always TOBII_ERROR_NOT_SUPPORTED, whatever the arguments, a null device and
  * a call from inside a callback included, as in the DLL, which checks and reads

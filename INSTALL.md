@@ -3,7 +3,7 @@
 Linux stack for the **Tobii Eye Tracker 5** (USB `2104:0313`): a daemon that
 claims the device once and serves head pose / gaze / presence (and everything
 else the Stream Engine offers) to multiple clients, a drop-in `libtobii.so` for
-the Stream Engine 4.1 C API, a calibration tool and an OpenTrack bridge.
+the Stream Engine 4.25 C API, a calibration tool and an OpenTrack bridge.
 
 ```
 libtobii.so / tobii-opentrack ──unix socket──▶ tobiid ──USB──▶ Tobii ET5
@@ -563,8 +563,10 @@ TOBII_IMAGE83_DEBUG=1 ./target/release/tobii-opentrack
   `[Service]` an empty `ExecStart=` and `ExecStart=… --host H --port P`.
   Run by hand on a terminal, it shows the pose it sends on one live line.
 - **`libtobii.so`** — the Stream Engine 4.25 C API: every one of the 199
-  entry points of `tobii_stream_engine.dll` 4.25.0.3, with its signatures,
-  `tobii_error_t` numbering and struct layouts, and no others. Headers:
+  entry points of `tobii_stream_engine.dll` 4.25.0.3, and no others, with
+  its signatures, `tobii_error_t` numbering and struct layouts but one
+  (`tobii_hardware_configuration_t` keeps 4.1.0.3's two-entry layout, where
+  4.25.0.3's holds four). Headers:
   `/usr/local/include/tobii/` (`tobii.h`, `tobii_streams.h`,
   `tobii_config.h`, `tobii_licensing.h`, `tobii_advanced.h`,
   `tobii_wearable.h`, `tobii_signing.h`, and `tobii_internal.h` for the

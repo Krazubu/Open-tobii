@@ -1,15 +1,20 @@
-//! The 73 exports of `tobii_stream_engine.dll` 4.1.0.3 that its documentation
-//! does not cover (all but `tobii_calibration_stimulus_points_get`, which
-//! lives with calibration). Their argument counts come from the DLL (see
-//! `tools/abi`); their types are best-effort, which is safe because only the
-//! field-of-use, image, raw gaze, foveated rendering gaze point, custom
-//! stream, image collection, internal-stream, internal-capability, timesync,
-//! stream-type, stream-column, pause, hardware-configuration and internal
-//! device-info functions below read their arguments, and
-//! `tobii_send_statistics` its two strings, typed as the DLL takes them; the
-//! subscribes and unsubscribes of the internal streams the DLL refuses, the
-//! face id calls and `tobii_set_display_info` only compare theirs with null,
-//! and `tobii_set_fw_upgrade_allowed` reads none.
+//! The exports of `tobii_internal.h` that no module of their own took: 49 of
+//! the 73 that `tobii_stream_engine.dll` 4.1.0.3's documentation does not
+//! cover (two of them under the names 4.25.0.3 gave them), and the 27 entry
+//! points 4.25.0.3 adds there. The other 24 live with calibration
+//! (`tobii_calibration_stimulus_points_get`) and in `state_commands`,
+//! `diagnostics`, `display_id`, `gaze_hid` and `custom_command`. Their
+//! argument counts come from the DLL (see `tools/abi`); their types are
+//! best-effort, which is safe because only the field-of-use, image, raw gaze,
+//! foveated rendering gaze point, custom stream, image collection,
+//! internal-stream, internal-capability, timesync, stream-type, stream-column,
+//! pause, hardware-configuration and internal device-info functions below
+//! read their arguments, and `tobii_send_statistics` its two strings, typed
+//! as the DLL takes them (the hardware configuration as 4.1.0.3 takes it);
+//! the subscribes and unsubscribes of the internal streams the DLL refuses,
+//! the face id calls, remote wake, the other refusals 4.25 adds and
+//! `tobii_set_display_info` only compare theirs with null, and
+//! `tobii_set_fw_upgrade_allowed` and the three stubs at the end read none.
 
 use std::ffi::{c_char, c_void};
 
@@ -1254,12 +1259,15 @@ pub extern "C" fn tobii_set_fw_upgrade_allowed(_device: *mut c_void, _allowed: u
 }
 
 /// Set the display information: `TOBII_ERROR_NOT_SUPPORTED` once the device
-/// and `display_info` check out, as the DLL (0x18014dcb0) answers on every
-/// path: it checks a null device (0x18014dcc6), takes its API mutex, checks
-/// a null `display_info` (0x18014dd3b) and answers
-/// `TOBII_ERROR_NOT_SUPPORTED` (0x18014dd62) without reading it. It has no
-/// callback check, so neither has this: from inside a callback the answers
-/// are the same. Unlike the DLL's, it waits for no other thread's call. The
+/// and `display_info` check out, as both DLLs answer. 4.1 (0x18014dcb0)
+/// checks a null device (0x18014dcc6), takes its API mutex, checks a null
+/// `display_info` (0x18014dd3b) and answers `TOBII_ERROR_NOT_SUPPORTED`
+/// (0x18014dd62) without reading it, on every path. It has no callback
+/// check, and neither has this: from inside a callback the answers are the
+/// same. 4.25 (0x18007cfe0) takes no mutex but checks the callback flag once
+/// both pointers check out (0x18007d07a) and answers
+/// `TOBII_ERROR_CALLBACK_IN_PROGRESS` there (0x18007d0ee), which this library
+/// does not. Like 4.25's, it waits for no other thread's call. The
 /// getter's record (`tobii_get_display_info`, see `display_id`) is 72 bytes,
 /// a 64-byte string and two `int`s (its module function, 0x180175660), which
 /// the setter never reads. The pointers are only compared with null, so the
@@ -2440,8 +2448,9 @@ mod tests {
 
     /// Inside a callback statistics are refused before their arguments are
     /// read (the DLL checks the nulls first), while the display information
-    /// and the firmware upgrade switch answer as outside one: the DLL never
-    /// checks for a callback in them.
+    /// and the firmware upgrade switch answer as outside one: 4.1 never
+    /// checks for a callback in them (4.25 does in the display information,
+    /// which this library does not follow).
     #[test]
     fn only_statistics_are_refused_inside_a_callback() {
         let (d, frames) = crate::device::tests::counting_device();

@@ -1,9 +1,19 @@
 # tools/abi — recovering the Stream Engine ABI
 
 `libtobii.so` exports every entry point of Tobii's `tobii_stream_engine.dll`
-**4.1.0.3** (the version resource of the reference DLL). No 4.x header was ever
-published outside Tobii's registration wall, so the ABI is reconstructed from
-three sources, in order of authority:
+**4.25.0.3**, and none of its own. This file derives the ABI of **4.1.0.3**
+(the version resource of the reference DLL), which the library followed until
+0.3.0. For the 151 entry points the two share, 4.25.0.3 keeps 4.1.0.3's
+signatures and enum values, and its struct layouts but for three records it
+is known to have enlarged: `tobii_gaze_raw_t` and
+`tobii_wearable_advanced_data_t`, which libtobii follows (in the table at the
+end), and `tobii_hardware_configuration_t`, four entries and 3960 bytes
+(inferred) where 4.1.0.3 has two and 2472, which it does not. Every address
+here is 4.1.0.3's unless it says 4.25; what 4.25 adds, and where it answers
+differently, is derived in the comments of `crates/tobii-ffi/` (`src/` and
+`include/tobii/`), at 4.25.0.3's addresses. No 4.x header was ever published
+outside Tobii's registration wall, so the ABI is reconstructed from three
+sources, in order of authority:
 
 1. **The DLL itself** — `dll_abi.py` reads its export table and derives, per
    export, which argument registers and stack slots are read, at what width,
@@ -21,10 +31,17 @@ None of these is vendored. Put the DLL anywhere and pass `--dll` (or set
 ## Usage
 
     tools/abi/dll_abi.py exports --check crates/tobii-ffi/abi-symbols.txt
-    tools/abi/dll_abi.py args --out fixtures/abi/args-4.1.0.3.tsv
-    tools/abi/dll_abi.py headers --args fixtures/abi/args-4.1.0.3.tsv
+    tools/abi/dll_abi.py args --out fixtures/abi/args-4.25.0.3.tsv
+    tools/abi/dll_abi.py headers --args fixtures/abi/args-4.25.0.3.tsv
     tools/abi/dll_abi.py dis tobii_calibration_collect_data_2d
     tools/abi/dll_abi.py callsites 0xeb70
+
+`exports --check` and `headers` hold the library to 4.25.0.3, so give them
+that DLL: against it both pass (199 exports listed and exported, 199
+prototypes without an error). Against 4.1.0.3, `exports --check` reports the
+48 listed names it does not export (4.25's 46 and the two it renamed) and the
+two it exports under the old names, and `headers` the same 48 as declared but
+not exported.
 
 `args` reports the *first read* of each argument location before anything
 writes it, walking linearly from the entry and stopping at an exit no earlier
@@ -36,7 +53,9 @@ prototype declares or a float/integer position disagrees.
 
 ## What it established
 
-- 153 exports: 80 documented in 4.1.0, 73 undocumented.
+- 153 exports: 80 documented in 4.1.0, 73 undocumented. (4.25.0.3 exports
+  199: 151 of these, the two `tobii_multiple_faces_position_*` renamed
+  `tobii_multiple_faces_*`, and 46 new.)
 - `tobii_device_create(api, url, field_of_use, device)` — four arguments,
   `field_of_use` read as 32 bits and validated to 1..2. A caller compiled
   against the three-argument pre-4.0 header lands its `device` pointer there.
@@ -441,7 +460,10 @@ prototype declares or a float/integer position disagrees.
   lock as the DLL reads it under its mutex) and answers as the DLL past the
   licence check, which it does not make: `TOBII_ERROR_CALIBRATION_NOT_STARTED`
   outside the session, `TOBII_ERROR_NOT_SUPPORTED` inside it, without asking
-  the daemon.
+  the daemon. Since 0.4.0 it first checks the out pointer and the eye
+  selection, each where the call takes one, as 4.25 does ahead of the device;
+  4.1 reaches its eye check only past the gates above and never checks the
+  pointer (`per_eye_argument` in `crates/tobii-ffi/src/calibration.rs`).
 - What licence storage answers. `tobii_license_key_store` (0x1801505c0)
   checks a null device (unlogged), then the callback flag, and answers
   `TOBII_ERROR_NOT_SUPPORTED` (0x18015069c) unless the device's command list
@@ -1216,7 +1238,7 @@ Layouts, and where each comes from:
 | `tobii_notification_t` | 520, align 4 | DLL (notification dispatcher: 512-byte string union at +8) |
 | `tobii_device_name_t` | `char[64]` | DLL (`tobii_get_device_name` writes 0x40 bytes) |
 | `tobii_state_string_t` | `char[512]` | DLL |
-| `tobii_version_t` | 16 | DLL (`tobii_get_api_version` writes {4,1,0,3}) |
+| `tobii_version_t` | 16 | DLL (`tobii_get_api_version` writes {4,1,0,3}; 4.25.0.3's, 0x180082e60, writes {4,25,0,3}, which libtobii reports) |
 | `tobii_custom_alloc_t` | 24 | DLL (`tobii_api_create` checks +8 and +0x10 at 0x180144ac7..0x180144ad2 and copies 24 bytes at 0x180144b36) |
 | `tobii_custom_log_t` | 16 | DLL (`tobii_api_create` checks +8 at 0x180144ae2 and copies 16 bytes at 0x180144b78) |
 | `tobii_gaze_data_t` | 176 (8+8+80+80) | 4.1 docs field list, corrected against both DLLs: the eye carries a fifth validity the docs omit, `eye_position_validity` at eye+0x10, so the eye is 80 bytes and not the docs' 76 |
@@ -1227,16 +1249,20 @@ Layouts, and where each comes from:
 | `tobii_stream_type_column_t` | 140, align 4 | DLL (the receiver trampoline at 0x180001eb0: words at +0/+4/+8, strings copied to +0xc/+0x4c; the parser's records 0x8c apart, 0x18017c1d8); names ours |
 | `tobii_custom_stream_data_t` | 24, align 8 | DLL (the dispatch's record at 0x180154666..0x18015467f: the stream at +0, a zero at +4, the size and the data pointer at +8 and +0x10, from the server's message, 0x1800284a2..0x1800284ea); names ours |
 | `tobii_image_collection_t` | 0x5c0, align 8 | DLL (the dispatch's record at 0x180155560..0x180155d8d: two times, six words, a count and 10 regions of 36 bytes from +0x28, five words from +0x194, a count and 64 LEDs of 16 bytes from +0x1a8, the size and the data pointer at +0x5b0 and +0x5b8; the entries' readers 0x1800048a0 and 0x180004620 for their 16.16 floats); no frame ever seen, names ours after the tracker's 1210 column names |
-| `tobii_hardware_configuration_t` | 2472, align 8 | DLL (its copy at 0x18014abe0 and the PRP deserialiser at 0x180045056); **provisional**: the values decoded from one Windows 2120 answer, field names and units ours |
+| `tobii_hardware_configuration_t` | 2472, align 8 | DLL (its copy at 0x18014abe0 and the PRP deserialiser at 0x180045056); **provisional**: the values decoded from one Windows 2120 answer, field names and units ours. This is 4.1's record, which libtobii keeps; 4.25's holds four entries, not two (its deserialiser clamps the count at 4, 0x180201237, where 4.1's clamps it at 2, 0x18004506d), and its copy (0x1800772c0) puts `point_count`, the points and `mode` at +0xba8, +0xbb0 and +0xf70, so it is 3960 bytes, inferred |
 | `tobii_display_info_t` | 72 | DLL (`platmod_ttp_get_display_info` 0x180175660: a `char[64]` at its +0, two dwords at +0x40/+0x44, copied at 0x180175815..0x18017581f and written by the response handler at 0x1801a3cc6..0x1801a3ce8); names ours, and the two dwords' meaning unknown |
 | `tobii_display_id_t` | `char[256]` | DLL (`tobii_set_display_id`'s `strncpy` of 0x100 at 0x1801466cb) |
 | `tobii_gaze_raw_t` | 248, align 8 | DLL (`process_gaze` 0x18018d9a0's key-to-offset switch, the raw gaze dispatch's copy at 0x180171b81..0x180171db8); 232 in 4.1, 248 in 4.25, which appends a tail its dispatch zeroes along with `reserved_e4`; field names ours |
 | `tobii_calibration_stimulus_points_t` | 1156, align 4 | DLL (the copier at 0x180001800, the PRP serialiser at 0x180042517 and deserialiser at 0x18004563e, the property cache copy at 0x180031c44); record contents unknown, names ours |
 | `tobii_wearable_advanced_data_t` | 216, align 8 | 4.1 docs field list (six fields per eye, each a validity and a value, so a 72-byte `tobii_wearable_advanced_eye_t`, our name); DLL (4.25's builders at 0x18008e4e0..0x18008e739 and 0x18008e740..0x18008e999, reached from the compound-stream slot dev+0x293b0: eyes at +0x10 and +0x58, the combined fields at +0xa0..+0xd4, memset of 0xc8 from +0x10 at 0x18008e50a. 4.1's, at 0x180156360..0x180156592, is 208: 4.25 inserts a validity and a float at +0xc8/+0xcc from the package's +0xb8/+0xbc, and the meaning of that pair is not in the binary, so its names are positional) |
-| everything else in `tobii_streams.h` / `tobii_wearable.h` | — | 4.1 docs, unchanged since 1.x |
+| everything else in `tobii_streams.h` / `tobii_wearable.h` | — | 4.1 docs, unchanged since 1.x, but for the records of the entry points 4.25 adds there (`tobii_responsive_gaze_point_t`, `tobii_presence_t`, `tobii_lens_configuration_extended_t`), whose sources their declarations give |
 
 Undocumented exports are declared in `tobii_internal.h` with the arity the DLL
-shows (73 of them). The 25 implemented ones (field of use, IR image, raw gaze,
+shows (73 of them, two under the names 4.25 gave them), beside 27 of the 46
+entry points 4.25.0.3 adds, whose arity `headers` checks against that DLL and
+which all answer `TOBII_ERROR_NOT_SUPPORTED` once their pointers, compared
+with null only, check out.
+The 25 implemented ones (field of use, IR image, raw gaze,
 the foveated rendering gaze point, the custom stream, image collection,
 internal-stream and internal-capability support, timesync, the stream
 catalogue and its streams' columns, pause and resume, hardware
@@ -1260,7 +1286,9 @@ depends on the route (see the section above): `TOBII_ERROR_NOT_SUPPORTED` for
 the diagnostics image pair, the two retrieves and the four display-id calls,
 `TOBII_ERROR_INSUFFICIENT_LICENSE` for clean IR, the diagnostics dump, the
 diagnostics data and the realm, and `TOBII_ERROR_NOT_AVAILABLE` for the
-display info. Only **five** exports now return `TOBII_ERROR_NOT_SUPPORTED`
+display info. Only **four** exports now return `TOBII_ERROR_NOT_SUPPORTED`
 without reading their arguments, so that only their best-effort parameter
-types cannot matter at runtime: reading and listing the illumination modes,
-arming and disarming remote wake, and the configuration key.
+types cannot matter at runtime: `tobii_set_fw_upgrade_allowed`, reading and
+listing the illumination modes, and the configuration key. Arming and
+disarming remote wake check the callback flag and their device first, as
+both DLLs check them, and then answer `TOBII_ERROR_NOT_SUPPORTED`.

@@ -20,7 +20,7 @@ description: |-
   Linux driver for the Tobii Eye Tracker 5
   tobiid, the daemon that owns the tracker and serves gaze, head pose and
   presence to local clients; libtobii.so, a library with the Stream Engine
-  4.1 API (OpenTrack's tracker-tobii builds against it), and its C headers;
+  4.25 API (OpenTrack's tracker-tobii builds against it), and its C headers;
   tobii-calibrate, the calibration, among the desktop's applications;
   tobii-opentrack and tobii-gaze-keys.
 

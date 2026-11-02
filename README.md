@@ -13,7 +13,7 @@ A Linux driver stack for the **Tobii Eye Tracker 5** (USB `2104:0313`), built
 by reverse-engineering the device's USB protocol. It gives you gaze, user
 presence and gaze-independent 6-DOF head pose — all at 33 Hz, all at the same
 time — plus calibration, through a daemon, a drop-in `libtobii.so` for Tobii's
-Stream Engine 4.1 C API, and a few thin clients.
+Stream Engine 4.25 C API, and a few thin clients.
 
 Tobii ships no Linux support for this device. Everything here was recovered
 from USB captures of the Windows Stream Engine.
@@ -143,12 +143,15 @@ while you play (`enable --now` for every login), and
 the same 199 functions as `tobii_stream_engine.dll` 4.25.0.3, with the DLL's
 signatures (`tools/abi/dll_abi.py headers` checks every prototype), error
 codes, enum values and struct layouts (the size of `tobii_stream_type_t` is
-inferred, and what the fields of `tobii_hardware_configuration_t` hold is
-provisional, as the headers say), so a program written for Stream Engine
-4.1 builds against its headers and runs unchanged; Architecture says what
-each function does with an ET5. OpenTrack's own Tobii tracker, the
-`tracker-tobii` plugin, is one once it is brought to Stream Engine 4: built
-on Linux from the `tracker-tobii-linux` branch of the
+inferred, `tobii_hardware_configuration_t` keeps 4.1.0.3's two-entry layout,
+and what its fields hold is provisional, as the headers say), so a program
+written for Stream Engine 4.1 builds against its headers and runs unchanged
+unless it calls the undocumented `tobii_multiple_faces_position_subscribe`
+or `_unsubscribe`, which 4.25 renamed `tobii_multiple_faces_subscribe` and
+`_unsubscribe`; Architecture says what each function does with an ET5.
+OpenTrack's own Tobii tracker, the `tracker-tobii` plugin, is one once it is
+brought to Stream Engine 4: built on Linux from the `tracker-tobii-linux`
+branch of the
 [OpenTrack fork](https://github.com/Skyggedans/opentrack/tree/tracker-tobii-linux),
 it reads the head pose through libtobii, with no UDP bridge. The fork lets
 the plugin build on Linux and against Stream Engine 4, reconnect after a
@@ -177,9 +180,14 @@ tobii-calibrate ─┘                      │
 so several consumers can read gaze and head pose at once.
 
 `libtobii.so` exports **all 199 entry points** of Tobii's
-`tobii_stream_engine.dll` 4.25.0.3, and no others, with its signatures, errornumbering and struct layouts — so any Stream Engine client links and runs. The
-ABI was recovered from the DLL itself (`tools/abi/`) and the archived 4.1.0
-reference. Three struct layouts follow the DLLs rather than that reference:
+`tobii_stream_engine.dll` 4.25.0.3, and no others, with its signatures, error
+numbering and struct layouts but one (`tobii_hardware_configuration_t` keeps
+4.1.0.3's two entries and 2472 bytes, where 4.25.0.3's holds four and is
+inferred to be 3960) — so any Stream Engine client links and runs. The ABI
+was recovered from the two DLLs themselves — 4.1.0.3's in `tools/abi/`, what
+4.25.0.3 adds or changes in the comments of `crates/tobii-ffi/` (`src/` and
+`include/tobii/`) — and the archived 4.1.0 reference. Three struct layouts
+follow the DLLs rather than that reference:
 `tobii_gaze_data_eye_t` carries a fifth validity the 4.1 documentation omits
 (80 bytes per eye, not 76), `tobii_gaze_raw_t` is 4.25's 248-byte record
 instead of 4.1's 232, and `tobii_wearable_advanced_data_t` is 4.25's 216-byte

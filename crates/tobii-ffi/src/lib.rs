@@ -33,7 +33,7 @@
 //!   `custom_command`). The hardware
 //!   configuration is implemented provisionally; the ET5 has reported none
 //!   on Linux, so it answers `TOBII_ERROR_NOT_SUPPORTED` there.
-//! - **Answered locally** — API version (4.1.0.3), error texts (the DLL's),
+//! - **Answered locally** — API version (4.25.0.3), error texts (the DLL's),
 //!   system clock, output frequency (33 Hz), enabled eye (both), feature
 //!   group (consumer), license validation (every key valid), display-area
 //!   calculation, calibration parsing, internal-capability support (eyeball
@@ -103,10 +103,11 @@
 //! `stub::licence_refused`, the per-eye calibration calls,
 //! `tobii_send_statistics`, `tobii_set_illumination_mode` and
 //! `tobii_enable_extension`, but not
-//! `tobii_set_display_info` or `tobii_set_fw_upgrade_allowed`, in which the
-//! DLL checks no callback flag. Four more refuse it once their arguments
-//! check out, as in the DLL: `tobii_api_destroy` (the DLL keeps its callback
-//! flag in the API instance), `tobii_device_create` and
+//! `tobii_set_display_info` or `tobii_set_fw_upgrade_allowed`, in which 4.1
+//! checks no callback flag (4.25 checks one in `tobii_set_display_info`,
+//! which this library does not; see there). Three more refuse it once their
+//! arguments check out, as in the DLL: `tobii_api_destroy` (the DLL keeps its
+//! callback flag in the API instance), `tobii_device_create` and
 //! `tobii_device_create_ex` (a callback could not destroy what they make).
 //! `tobii_calibration_parse` is the one entry point that does **not** refuse
 //! a call from inside a callback: 4.25 dropped the check 4.1 had, and this
@@ -153,12 +154,13 @@
 //! `tobii_calibration_apply` its blob and `tobii_wait_for_callbacks` its
 //! count and null handles. The DLL checks the handle, and sometimes more,
 //! first, so the two differ only for an invalid argument passed from inside a
-//! callback. Two check no callback, as in the DLL: `tobii_set_display_info`,
-//! which checks its pointers only, and `tobii_set_fw_upgrade_allowed`, which
-//! checks nothing. The DLL also refuses only calls into the API instance
-//! whose callbacks run, where here any is refused, and it counts the receiver
-//! of `tobii_enumerate_local_device_urls(_ex)` as a callback, where here its
-//! `# Safety` section forbids re-entry.
+//! callback. Two check no callback, as in 4.1: `tobii_set_display_info`,
+//! which checks its pointers only (where 4.25 refuses a call from inside a
+//! callback once they check out), and `tobii_set_fw_upgrade_allowed`, which
+//! checks nothing, in 4.25 too. The DLL also refuses only calls into the API
+//! instance whose callbacks run, where here any is refused, and it counts the
+//! receiver of `tobii_enumerate_local_device_urls(_ex)` as a callback, where
+//! here its `# Safety` section forbids re-entry.
 //!
 //! `tobii_calibration_parse` checks in the DLL's order: a null `api` or
 //! `data`, a `data_size` under 8 or a null `receiver`
