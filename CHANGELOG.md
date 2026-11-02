@@ -6,10 +6,10 @@ release's; the full history is in the git log.
 This project keeps no compatibility promise of its own below 1.0, but
 `libtobii.so` does: it presents exactly the 199 entry points of Tobii's
 Stream Engine 4.25.0.3 and is held to them by `make verify-abi` on every
-change. Where an answer differs from the Windows DLL's it is deliberate and
-written down: in docs/stream-engine-api.md for the entry points 4.1 already
-had, and for those 4.25 added in the 0.3.0 entry below and the README's
-"Limitations".
+change. Where an answer differs from the Windows DLL's it is written down in
+docs/stream-engine-api.md, which covers all 199 entry points: with its
+reason, or marked as a mistake where it is one, as the responsive gaze point
+and the abort on signing with a small key are.
 
 ## Unreleased
 

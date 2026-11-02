@@ -194,12 +194,12 @@ instead of 4.1's 232, and `tobii_wearable_advanced_data_t` is 4.25's 216-byte
 one instead of 4.1's 208 — the changelog says why.
 
 Of those 199: most are served by the daemon from the tracker's own data, some
-are answered locally because the Stream Engine answers them locally too, and
+are answered locally because the Stream Engine answers them locally too,
 **five of the 4.1 surface remain unimplemented refusals** — reading and
-listing the illumination
-modes, arming and disarming remote wake (the tracker refuses all four itself,
-so the answer is right) and the configuration key, which needs a realm no
-entry point can open.
+listing the illumination modes, arming and disarming remote wake (the tracker
+refuses all four itself, so the answer is right) and the configuration key,
+which needs a realm no entry point can open — and twenty-nine of the
+forty-six names 4.25 adds are refusals too (Limitations says which, and why).
 
 Where an answer cannot be the Stream Engine's it diverges deliberately: the
 combined-gaze HID track box is the tracker's measured one rather than the
@@ -208,8 +208,11 @@ DLL bounds neither, seven entry points keep the DLL's licence refusal, and
 seven of the thirteen notification types are delivered.
 
 **[docs/stream-engine-api.md](docs/stream-engine-api.md) says what every entry
-point answers and why**, divergence by divergence; `tools/abi/README.md`
-carries the derivation with the DLL addresses each claim was read at.
+point answers and why**, divergence by divergence, the 48 names 4.25 added
+included. `tools/abi/README.md` carries 4.1.0.3's derivation, with the DLL
+addresses each claim was read at, and the comments in `crates/tobii-ffi/`
+(`src/` and `include/tobii/`) carry that of what 4.25.0.3 adds or changes,
+with the DLL addresses where they give them.
 
 The headers are in `crates/tobii-ffi/include/tobii/` (installed to
 `/usr/include/tobii/` by the packages, `/usr/local/include/tobii/` by `make
@@ -308,19 +311,23 @@ tools/headpose/truth.py --session LOG JSONL FITS ...         # yaw and pitch vs 
   which `TOBII_ERROR_NOT_SUPPORTED` is nevertheless the right answer, the
   tracker refusing all four itself — and the configuration key, which needs a
   realm no entry point can open.
-- **Thirty of the forty-six entry points 4.25 adds are refusals too**, and for
-  the same reason: they are streams and properties the DLL itself serves only
-  behind the Tobii service, for hardware an Eye Tracker 5 is not — the
-  wearable and camera-image streams, the facial landmarks, the device log, the
-  algorithm-debug stream, the remote cameras, the extended lens
-  configuration, the ambient light level (whose handler in 4.25 is a stub
-  returning `TOBII_ERROR_NOT_SUPPORTED` as well), proximity data collection
-  and the two algo-box commands. Each checks its arguments and answers as the
-  DLL does, and none invents data. The other sixteen are real: the fault and
-  warning lists and their streams, the output-frequency stream, the responsive
-  gaze point, 4.25's presence stream, and the four signing calls, which need
-  no device at all.
-  [docs/stream-engine-api.md](docs/stream-engine-api.md) has the rest.
+- **Twenty-nine of the forty-six entry points 4.25 adds are refusals too**:
+  streams, properties and commands the DLL itself serves only behind the
+  Tobii service, for hardware an Eye Tracker 5 is not, or, for absolute eye
+  openness, gates on a licence a consumer tracker lacks — the wearable and
+  camera-image streams, the facial landmarks, the device log, absolute eye
+  openness, the algorithm-debug stream, the remote cameras, reading and
+  writing the extended lens configuration, the ambient light level (whose
+  handler in 4.25's own tracker module is a stub that refuses it too),
+  proximity data collection, `tobii_force_frame_sequence` and
+  `tobii_set_algo_box_mode`. Each checks its arguments, and none invents data.
+  The other seventeen give real answers: the fault and warning lists and their
+  streams, 4.25's presence stream, the responsive gaze point (though, by a
+  mistake not yet fixed, it carries the filtered point), the output-frequency
+  stream, whether the extended lens configuration can be written (never), and
+  the four signing calls, which need no device at all.
+  [docs/stream-engine-api.md](docs/stream-engine-api.md#what-425-added) says
+  what each answers and where that differs from the DLL.
 - The calibration sequence mirrors the one captured from Windows; 3-D and
   per-eye calibration are not supported, as the Stream Engine answers for
   an ET5 (per-eye calls check their own arguments first, as 4.25 does, and

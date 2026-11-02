@@ -1,16 +1,23 @@
-# What stands behind the 153 entry points
+# What stands behind the 199 entry points
 
 `libtobii.so` exports **all 199 entry points** of Tobii's
 `tobii_stream_engine.dll` 4.25.0.3, and no others, with its signatures, error
-numbering and struct layouts — so any Stream Engine client links and runs.
+numbering and struct layouts but one (`tobii_hardware_configuration_t` keeps
+4.1.0.3's two entries and 2472 bytes, where 4.25.0.3's holds four and is
+inferred to be 3960) — so any Stream Engine client links and runs.
 4.1.0.3, which this library followed until it had the whole of 4.25's
-surface, exports 153 of them. The ABI was recovered from the two DLLs
-themselves (`tools/abi/`) and the archived 4.1.0 reference, which the
-binaries overrule where they disagree with it.
+surface, exports 151 of them, and two that 4.25 renamed. The ABI was
+recovered from the two DLLs themselves (`tools/abi/`) and the archived
+4.1.0 reference, which the binaries overrule where they disagree with it.
 
 This page says what each entry point answers for a Tobii Eye Tracker 5 and,
-where that is not what the Windows DLL answers, why. `tools/abi/README.md`
-carries the derivation with the DLL addresses every claim was read at;
+where that is not what the Windows DLL answers, why: *What stands behind the
+entry points* for those 4.1 already had and for what all of them share,
+*What 4.25 added* for the 48 names 4.25 added. `tools/abi/README.md` carries
+4.1.0.3's derivation, with the DLL addresses every claim was read at; what
+4.25.0.3 adds or changes is derived in the doc comments of
+`crates/tobii-ffi/src/` and the headers in `crates/tobii-ffi/include/tobii/`,
+with the DLL addresses where those give them.
 [CHANGELOG.md](../CHANGELOG.md) says what changed when. For the shape of the
 driver rather than its API, see the README.
 
@@ -18,9 +25,9 @@ driver rather than its API, see the README.
 
 | | Entry points |
 |---|---|
-| Implemented (daemon-backed) | device lifetime and callbacks; gaze point, gaze origin, eye position, user position guide, presence, head pose, gaze data, raw gaze (the Stream Engine's own record of each gaze frame, `tobii_gaze_raw_subscribe`), the foveated rendering gaze point (made from raw gaze as the Stream Engine makes it for a tracker it drives itself, `tobii_foveated_rendering_gaze_point_subscribe`) and IR image streams; the custom stream (the tracker's stream 0x1770 as custom stream 0, subscribed by the Stream Engine's rules, `tobii_custom_stream_subscribe`; its frames carry no data on the ET5); image collection's subscribe (the tracker's stream 0x508, started as the Stream Engine starts it, `tobii_image_collection_subscribe`; the ET5 refuses it, so it answers `TOBII_ERROR_INTERNAL`, as the Stream Engine does, and no frame is ever delivered); notifications (display area, calibration state and id, pause, power save, faults and warnings); device info (the public and the internal one, `tobii_get_device_info_internal`), track box, display area (get/set), mounting, states; 2-D calibration, including discarding a point; the device/host clock pair (`tobii_timesync`); the tracker's stream catalogue and its streams' columns (`tobii_enumerate_stream_type_columns`); internal-stream support (the IR image, and the custom stream and image collection while that catalogue lists them, as the Stream Engine answers for an ET5, `tobii_internal_stream_supported`); device pause and resume; power save, entered and left (`tobii_power_save_activate`, `_deactivate`), with its state and remote wake's; the tracker's extension lists (`tobii_enumerate_extensions`, `_enabled_extensions`), which on an ET5 are empty; the device name (kept by the host); the hardware configuration (provisional, see below); whether the tracker reports gaze over HID (`tobii_get_gaze_hid_enabled`, from its 1330 property 5, `false` on an ET5) and the track box that gaze is reported in (`tobii_get_combined_gaze_hid_track_box`, the tracker's measured one — see below); an application's own command to the tracker (`tobii_send_custom_command`, the tracker's command 5000) |
-| Answered locally | API version, error texts (the DLL's), system clock, output frequency (33 Hz), enabled eye, capabilities, feature group, license validation, display-area calculation, calibration parsing, internal-capability support (eyeball centres only), lens-configuration writability (never), usage statistics (`TOBII_ERROR_NOT_AVAILABLE`, as the DLL answers without Tobii's Stream Engine Services); setting the illumination mode and enabling an extension (`TOBII_ERROR_INSUFFICIENT_LICENSE`, as the DLL answers a consumer ET5 without asking the tracker); clean IR, dumping the diagnostic images, reading diagnostics data and opening a realm (the same `TOBII_ERROR_INSUFFICIENT_LICENSE`, their module functions testing the licence before anything else, so no command goes out and no realm key is ever read); the display info (`TOBII_ERROR_NOT_AVAILABLE`, as the DLL answers without Tobii's Stream Engine Services, like the usage statistics) |
-| `TOBII_ERROR_NOT_SUPPORTED` | what the ET5 refuses: remote wake and reading the illumination mode, whose commands it answers with an error the Stream Engine turns into this very code (the state commands, below); the configuration key, which it refuses until a realm it names (10000) is open (the Stream Engine answers otherwise, see the licences below); the diagnostics image and the display id, a stream and a property its catalogue and property lists do not hold; retrieving its diagnostic images or log files, whose Stream Engine commands its tracker module never offers; and what it was never observed doing: wearable, face id, firmware, licence storage on the device, 3-D and per-eye calibration, calibration stimulus points, the internal low-frequency head rotation and position, multiple faces position, wearable limited image and secondary camera image streams (for the wearable entry points, the digital sync port, face id, 3-D and per-eye calibration, the stimulus points and those five streams, the DLL's own answer for a tracker it drives itself through its in-process legacy TTP module, once the arguments check out; behind Tobii's service, never captured; per-eye calibration only inside the handle's own session, `TOBII_ERROR_CALIBRATION_NOT_STARTED` outside it, as there; for the face types, which the DLL asks the tracker for, and licence storage, which it offers a tracker with persistent storage, inferred) |
+| Implemented (daemon-backed) | device lifetime and callbacks; gaze point, gaze origin, eye position, user position guide, presence, head pose, gaze data, raw gaze (the Stream Engine's own record of each gaze frame, `tobii_gaze_raw_subscribe`), the foveated rendering gaze point (made from raw gaze as the Stream Engine makes it for a tracker it drives itself, `tobii_foveated_rendering_gaze_point_subscribe`) and IR image streams; the custom stream (the tracker's stream 0x1770 as custom stream 0, subscribed by the Stream Engine's rules, `tobii_custom_stream_subscribe`; its frames carry no data on the ET5); image collection's subscribe (the tracker's stream 0x508, started as the Stream Engine starts it, `tobii_image_collection_subscribe`; the ET5 refuses it, so it answers `TOBII_ERROR_INTERNAL`, as the Stream Engine does, and no frame is ever delivered); notifications (display area, calibration state and id, pause, power save, faults and warnings); device info (the public and the internal one, `tobii_get_device_info_internal`), track box, display area (get/set), mounting, states; 2-D calibration, including discarding a point; the device/host clock pair (`tobii_timesync`); the tracker's stream catalogue and its streams' columns (`tobii_enumerate_stream_type_columns`); internal-stream support (the IR image, and the custom stream and image collection while that catalogue lists them, as the Stream Engine answers for an ET5, `tobii_internal_stream_supported`; absolute eye openness aside, see *What 4.25 added*); device pause and resume; power save, entered and left (`tobii_power_save_activate`, `_deactivate`), with its state and remote wake's; the tracker's extension lists (`tobii_enumerate_extensions`, `_enabled_extensions`), which on an ET5 are empty; the device name (kept by the host); the hardware configuration (provisional, see below); whether the tracker reports gaze over HID (`tobii_get_gaze_hid_enabled`, from its 1330 property 5, `false` on an ET5) and the track box that gaze is reported in (`tobii_get_combined_gaze_hid_track_box`, the tracker's measured one — see below); an application's own command to the tracker (`tobii_send_custom_command`, the tracker's command 5000) |
+| Answered locally | API version, error texts (the DLL's), system clock, output frequency (33 Hz), enabled eye, capabilities, stream support (the streams libtobii delivers, where the DLL answers from what the device reports and never reports the user position guide for a tracker it drives itself, `tobii_stream_supported`), feature group, license validation, display-area calculation, calibration parsing, internal-capability support (eyeball centres only), lens-configuration writability (never), usage statistics (`TOBII_ERROR_NOT_AVAILABLE`, as the DLL answers without Tobii's Stream Engine Services); setting the illumination mode and enabling an extension (`TOBII_ERROR_INSUFFICIENT_LICENSE`, as the DLL answers a consumer ET5 without asking the tracker); clean IR, dumping the diagnostic images, reading diagnostics data and opening a realm (the same `TOBII_ERROR_INSUFFICIENT_LICENSE`, their module functions testing the licence before anything else, so no command goes out and no realm key is ever read); reading the display info (`TOBII_ERROR_NOT_AVAILABLE`, as the DLL answers without Tobii's Stream Engine Services, like the usage statistics) |
+| `TOBII_ERROR_NOT_SUPPORTED` | what the ET5 refuses: remote wake and reading the illumination mode, whose commands it answers with an error the Stream Engine turns into this very code (the state commands, below); the configuration key, which it refuses until a realm it names (10000) is open (the Stream Engine answers otherwise, see the licences below); the diagnostics image and the display id, a stream and a property its catalogue and property lists do not hold; retrieving its diagnostic images or log files, whose Stream Engine commands its tracker module never offers; and what it was never observed doing: wearable, face id, firmware, licence storage on the device, 3-D and per-eye calibration, calibration stimulus points, the internal low-frequency head rotation and position, multiple faces position, wearable limited image and secondary camera image streams (for the wearable entry points, the digital sync port, face id, 3-D and per-eye calibration, the stimulus points and those five streams, the DLL's own answer for a tracker it drives itself through its in-process legacy TTP module, once the arguments check out; behind Tobii's service, never captured; per-eye calibration only inside the handle's own session, `TOBII_ERROR_CALIBRATION_NOT_STARTED` outside it, as there; for the face types, which the DLL asks the tracker for, and licence storage, which it offers a tracker with persistent storage, inferred); and setting the display info, which both DLLs refuse without reading it (*The display id and info*) |
 
 Where the answers come from, and where they differ from Windows:
 
@@ -214,7 +221,11 @@ Where the answers come from, and where they differ from Windows:
   is `TOBII_ERROR_NOT_AVAILABLE`: past the Stream Engine's own checks it is
   not a tracker command at all but a request to Tobii's Stream Engine
   Services, which Linux has not — the same reason the usage statistics
-  answer that code.
+  answer that code. `tobii_set_display_info` is `TOBII_ERROR_NOT_SUPPORTED`
+  once its two pointers check out, as both DLLs answer without reading the
+  record, and from inside a callback too, as 4.1's does, where 4.25's
+  answers `TOBII_ERROR_CALLBACK_IN_PROGRESS`
+  (`crates/tobii-ffi/src/internal.rs`).
 - **Realms.** `tobii_open_realm` is `TOBII_ERROR_INSUFFICIENT_LICENSE`, which
   is what the Stream Engine answers a consumer ET5 before it contacts the
   tracker: its module tests the licence level as its first instruction. So no
@@ -347,11 +358,12 @@ Where the answers come from, and where they differ from Windows:
   `TOBII_ERROR_CONNECTION_FAILED` rather than a wait, and a tracker unplugged
   shortly before or during the call makes it so about a second after the
   daemon gives the tracker up.
-- **Hardware configuration.** Its layout is the DLL's, but what the fields
-  hold is inferred from one Windows capture, and on Linux the ET5 has
-  answered its command (2120) with no data, so
-  `tobii_hardware_configuration_get` is `TOBII_ERROR_NOT_SUPPORTED` until it
-  reports one.
+- **Hardware configuration.** Its layout is 4.1.0.3's, not 4.25.0.3's (see
+  the top of this page): growing it would overrun the 2472 bytes a caller
+  built against 4.1 provides. What the fields hold is inferred from one
+  Windows capture, and on Linux the ET5 has answered its command (2120) with
+  no data, so `tobii_hardware_configuration_get` is
+  `TOBII_ERROR_NOT_SUPPORTED` until it reports one.
 - **Threads.** As the Stream Engine promises, the functions may be called
   from several threads at once, on one device too: a device's state is
   locked by concern, as the DLL's is. Its requests, subscription changes and
@@ -423,3 +435,156 @@ them from the `tracker-tobii-linux` branch of the
 [OpenTrack fork](https://github.com/Skyggedans/opentrack/tree/tracker-tobii-linux),
 which brings it to Stream Engine 4 and lets it configure on Linux
 (INSTALL.md §8).
+
+## What 4.25 added
+
+Stream Engine 4.25 adds 46 entry points to 4.1's and renames two:
+`tobii_multiple_faces_position_subscribe` and `_unsubscribe` are now
+`tobii_multiple_faces_subscribe` and `_unsubscribe`, the same internal stream
+5, refused as before. The old names are gone from the DLL and from
+`libtobii.so` alike, so a program built against 4.1 that calls them has to
+move to the new ones, as it would against Tobii's own 4.25 DLL. Of the 46, ten
+are served by the daemon, seven are answered locally and twenty-nine are
+refused; every subscribe has its unsubscribe. Their derivations are in the doc
+comments of the files named below, in `crates/tobii-ffi/src/` unless a path
+says otherwise (the `tobii/` headers are in `crates/tobii-ffi/include/`), with
+the DLL addresses where those comments give them, rather than in
+`tools/abi/README.md`, which covers 4.1; what was inferred rather than read is
+marked so here.
+
+| | Entry points |
+|---|---|
+| Implemented (daemon-backed) | the tracker's fault and warning lists, read (`tobii_get_faults`, `tobii_get_warnings`) and as streams (`tobii_faults_subscribe`, `tobii_warnings_subscribe`); 4.25's presence stream (`tobii_presence_subscribe`); the responsive gaze point (`tobii_responsive_gaze_point_subscribe`, `tobii_stream_t` 12, which `tobii_stream_supported` reports supported), which by mistake carries the filtered point (below) |
+| Answered locally | the output-frequency stream (`tobii_output_frequency_subscribe`: 33 Hz, once); the four signing calls (`tobii_signing_sign`, `tobii_signing_sign_with_private_key`, `tobii_signing_verify`, `tobii_signing_verify_with_public_key`), which need no device; whether the extended lens configuration can be written (`tobii_lens_configuration_extended_writable`: never, as for the basic one, and, inferred, as the DLL answers) |
+| `TOBII_ERROR_NOT_SUPPORTED` | the internal streams 4.25 added: proximity data collection (`tobii_proximity_data_collection_subscribe`), the wearable entrance pupil position (`tobii_wearable_entrance_pupil_position_subscribe`), the primary camera image (`tobii_primary_camera_image_subscribe`, a stream of its own; the IR image is `tobii_image_subscribe`'s), the wearable diagnostics image and the wearable image (`tobii_wearable_diagnostics_image_subscribe`, `tobii_wearable_image_subscribe`), the device log (`tobii_device_log_subscribe`; not the log `tobii_logs_retrieve` fetches), absolute eye openness (`tobii_absolute_eye_openness_subscribe`) and the 3-D facial landmarks (`tobii_facial_landmarks_3d_subscribe`); multiple faces, under its new name (`tobii_multiple_faces_subscribe`); the ambient light level (`tobii_ambient_light_level_subscribe`), the facial-landmark groups (`tobii_facial_landmarks_groups_enumerate`) and the algorithm-debug stream (`tobii_algodbg_stream_subscribe`; the ET5's own stream named "algodbg", 0x1770, is custom stream 0); the remote cameras (`tobii_remote_cameras_enumerate`, `tobii_remote_camera_set`, `tobii_remote_camera_listener_subscribe`); reading and writing the extended lens configuration (`tobii_get_lens_configuration_extended`, `tobii_set_lens_configuration_extended`); and the two PRP commands `tobii_force_frame_sequence` and `tobii_set_algo_box_mode` (the DLL's own answer for a tracker it drives itself, once the arguments check out: read for the internal streams' subscribes and the ambient light level's, inferred for the rest; absolute eye openness is below) |
+
+Where the answers come from, and where they differ from Windows:
+
+- **Arguments.** The 44 of these 48 names that take a device (all but the four
+  signing calls) check their arguments in this library's usual order
+  (`lib.rs`): a call from inside a callback is
+  `TOBII_ERROR_CALLBACK_IN_PROGRESS` before anything else, then a null device,
+  or a null callback, receiver, buffer, path or other pointer the call
+  requires, is `TOBII_ERROR_INVALID_PARAMETER`. The DLL checks its nulls
+  before its callback flag, so the two differ for a null argument passed from
+  inside a callback.
+- **Refusals.** Past those checks the refusals answer
+  `TOBII_ERROR_NOT_SUPPORTED`, with nothing sent to the daemon, registered or
+  written (`stub.rs`, `internal.rs`, `wearable.rs`). An unsubscribe is
+  `TOBII_ERROR_NOT_SUPPORTED` too, never `TOBII_ERROR_NOT_SUBSCRIBED`, and so
+  is the DLL's, which checks support before it looks for a subscription (read
+  for the internal streams, inferred for the algorithm-debug stream and the
+  remote-camera listener), but for two that may differ: absolute eye
+  openness's (below), and the ambient light level's, which the DLL answers
+  `TOBII_ERROR_NOT_SUBSCRIBED` for a device that lists its property, 0x18
+  (whether an ET5 does was not traced). `tobii_remote_camera_set` **differs on
+  purpose**: a null path is `TOBII_ERROR_INVALID_PARAMETER`, where the DLL
+  copies the path before any check and so crashes on a null one.
+- **Absolute eye openness.** `tobii_internal_stream_supported` reports its
+  internal stream, 0x10, unsupported, and its subscribe and unsubscribe are
+  `TOBII_ERROR_NOT_SUPPORTED`, every time. In 4.25 it is the one stream of
+  those added that the DLL's support check has a case for, on the path it
+  takes for a tracker it drives itself, and the case is a licence gate. Below
+  licence level 2 (a consumer ET5 is at 0, inferred for 4.25 from 4.1) the
+  gate refuses on the licence and returns without writing the answer the check
+  then reads, so the DLL answers from whatever its stack held: the stream is
+  unsupported, and its subscribe `TOBII_ERROR_NOT_SUPPORTED`, unless that word
+  happens to be 1. Its unsubscribe asks the same check before it looks for a
+  subscription, so it is `TOBII_ERROR_NOT_SUPPORTED` too, or, when the word is
+  1 and nothing is subscribed, `TOBII_ERROR_NOT_SUBSCRIBED`. At level 2 or
+  more the gate answers from a word of the DLL's tracker module whose meaning
+  is not known. libtobii gives the one deterministic answer, which is also
+  what the gate's licence check means, and there is nothing to hand out: the
+  ET5's own "Absolute Eye Openness" columns are always -1.0 and invalid
+  (`internal.rs`, `crates/tobii-proto/src/gaze83.rs`).
+- **Fault and warning lists.** `tobii_get_faults` and `tobii_get_warnings` are
+  `tobii_get_state_string` for `TOBII_STATE_FAULT` and `TOBII_STATE_WARNING`
+  (4.25 has it the other way round, the state call a wrapper over the two
+  getters, for the same text), so they answer as it does (*Facts from the last
+  init*): "ok" on an ET5; `TOBII_ERROR_NOT_SUPPORTED` when the tracker's init
+  reported no list, as the DLL answers (read in 4.1, inferred for 4.25); and,
+  the daemon being asked, `TOBII_ERROR_TIMED_OUT` or
+  `TOBII_ERROR_CONNECTION_FAILED` where the DLL reads a cache of its own
+  (`faults.rs`, `api.rs`). `tobii_faults_subscribe` and
+  `tobii_warnings_subscribe` hand their callback the text of every list the
+  tracker announces (3200/3210), changed or not, as the Stream Engine passes
+  those on as notifications, each right after its `FAULTS_CHANGED` or
+  `WARNINGS_CHANGED` notification (`crates/tobiid/src/frames.rs`,
+  `device.rs`). Subscribing starts the daemon's notification stream and asks
+  for nothing else, so nothing comes at subscribe; the getters answer the list
+  standing then. The DLL most likely hands a new subscriber that list at once,
+  or an empty string while it holds none: its tracker module calls the
+  subscriber before the subscribe returns, and that this reaches the
+  application's callback is inferred (`faults.rs`). An ET5 has never been seen
+  announcing either list, so neither callback has been seen to run on one.
+- **Presence, as 4.25 serves it.** `tobii_presence_subscribe` delivers what
+  `tobii_user_presence_subscribe` does, the status and its timestamp, in a
+  `tobii_presence_t`, from the one presence the daemon sends; 4.25 reads it
+  from its property 0x14 instead, and what it answers there for an ET5 was not
+  traced (the current Tobii reference marks the pair deprecated;
+  `streams.rs`). The two see the same changes, but a subscribe to either while
+  the other already holds presence on the device is not told the presence
+  standing then, and hears of it at its next change: it changes nothing the
+  device asks of the daemon, which reports the standing presence only to a
+  connection newly asking for it. Nothing chose that; in the DLL the two are
+  separate subscriptions.
+- **The responsive gaze point is the filtered one.** 4.25's stream 12 is for
+  the tracker's responsive combined gaze point, which an ET5 sends, by its own
+  column names, as key 0x20 of each gaze frame, unfiltered: the mean of the
+  eyes' 2-D points while both are tracked, the tracked eye's while one is
+  (`crates/tobii-proto/src/gaze83.rs`).
+  `tobii_responsive_gaze_point_subscribe` hands out the combined point of the
+  daemon's raw-gaze record instead, which `tobiid` fills, as the Stream Engine
+  fills its own, from the filtered point (key 0x1c): the point and host time
+  `tobii_gaze_point_subscribe` delivers, valid whenever the tracker's validity
+  word is not 0, where the gaze point is valid only when it is 1, and nothing
+  at all from a `tobiid` too old to stamp that record with the host time. It
+  **differs by mistake** from what the stream is for, as its header says, and,
+  inferred from the names alone, from what the DLL hands out (`streams.rs`,
+  `tobii/tobii_streams.h`); handing out key 0x20 needs `tobiid` to send it,
+  which no daemon message does. Subscribing to it alone starts the daemon's
+  raw-gaze stream, as `tobii_gaze_raw_subscribe` does.
+- **Output frequency.** `tobii_output_frequency_subscribe` calls its receiver
+  once, with 33 Hz, on the calling thread before it returns, and never again:
+  the ET5 runs at that one frequency (*Notifications*). The DLL's source for
+  it fires once when the subscription is taken and again on each change; on
+  which thread, and when, is not traced. The subscription is kept, so a second
+  subscribe is `TOBII_ERROR_ALREADY_SUBSCRIBED` and the unsubscribe has
+  something to clear, as there; neither asks the daemon (`config.rs`).
+- **Signing.** The four signing calls touch no device: SHA-256 with RSA PKCS#1
+  v1.5 over a PEM key, the signature in standard base64, as the DLL computes
+  it in OpenSSL; run under Wine, the 4.25 DLL gave the same signature byte for
+  byte (`signing.rs`). They return a `tobii_signing_result_t`, **not** a
+  `tobii_error_t`: each of its values 0..16 is also a `tobii_error_t` value,
+  every one but 0 with another meaning (2 is
+  `TOBII_ERROR_INSUFFICIENT_LICENSE`), so a result is checked against its own
+  names (`tobii/tobii_signing.h`).
+  They **differ on purpose** where the DLL's behaviour is a memory error. A
+  null argument is `TOBII_SIGNING_NULL_ARGUMENT`, `signature_size` (which the
+  DLL writes through unchecked) and a verify's key path (which it passes to
+  `fopen`) included. Nothing is written on failure, where the DLL's
+  `tobii_signing_sign` clears the caller's 640 bytes first (its
+  `_with_private_key` form clears nothing). The signature is always
+  NUL-terminated, where the DLL's is only while the raw signature is 477 bytes
+  or less (636 encoded, a key of at most 3816 bits), and never with the key in
+  memory. A signature that would not fit the 640 bytes with its terminator
+  (any key over 3816 bits, RSA-4096 included) is
+  `TOBII_SIGNING_BASE64_FAILED`, where the DLL fills the buffer without one
+  or, past 3840 bits, runs beyond it; so is a signature to verify that decodes
+  to more than 640 bytes, where the DLL's `tobii_signing_verify` runs off its
+  640-byte frame.
+  They also differ where nothing was chosen, `libtobii.so` signing with Rust
+  crates rather than the DLL's OpenSSL (`signing.rs`). It reads only an
+  unencrypted RSA key, PKCS#8 or PKCS#1 to sign and SPKI to verify, as the one
+  PEM block of its text, with nothing after its END line but one line ending:
+  trailing text, a blank line or a NUL counted in `key_data_size` is
+  `TOBII_SIGNING_SIGN_PEM_FAILED` or `TOBII_SIGNING_VERIFY_PEM_FAILED`, and so
+  is a public exponent of 2^33 or more in either kind of key, or a public key
+  of more than 4096 bits, where OpenSSL reads more keys (inferred). Key bytes
+  in memory that are not UTF-8 are `TOBII_SIGNING_KEY_BUFFER_FAILED`, where
+  the DLL hands them to its PEM reader as they are, which answers
+  `TOBII_SIGNING_SIGN_PEM_FAILED` or `TOBII_SIGNING_VERIFY_PEM_FAILED` when it
+  finds no key in them. And, **by mistake**, signing with an RSA key of 488
+  bits or fewer, too short for the padding, aborts the calling process, where
+  the DLL fails with one of its OpenSSL codes (inferred); verifying under such
+  a key answers `TOBII_SIGNING_NOT_VERIFIED`.

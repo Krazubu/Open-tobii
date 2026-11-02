@@ -12,14 +12,14 @@ symbol appears, disappears or stops being declared in the headers, and CI runs
 it on every pull request.
 
 Where an answer cannot be the Stream Engine's, it diverges **deliberately and
-in writing**. For the 153 entry points 4.1 already had,
-[docs/stream-engine-api.md](docs/stream-engine-api.md) says what each answers
-and where that differs from Windows, and `tools/abi/README.md` carries the
-derivation with the DLL addresses it came from. The 46 that 4.25 added, and
-its two renames, are described in `CHANGELOG.md`'s 0.3.0 entry, the README's
-"Limitations" and their doc comments in `crates/tobii-ffi/src/`. A change that
-adds a divergence is expected to add its entry. "It seemed more sensible" is a
-reason; it just has to be written down.
+in writing**. [docs/stream-engine-api.md](docs/stream-engine-api.md) says
+what each of the 199 entry points answers and where that differs from
+Windows. `tools/abi/README.md` carries 4.1.0.3's derivation, with the DLL
+addresses it came from, and the doc comments in `crates/tobii-ffi/` (`src/`
+and `include/tobii/`) carry that of what 4.25.0.3 adds or changes, with the
+DLL addresses where they give them. A change that adds a divergence is
+expected to add its entry. "It seemed more sensible" is a reason; it just has
+to be written down.
 
 ## Before you open a pull request
 
