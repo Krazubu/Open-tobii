@@ -587,7 +587,8 @@ Where the answers come from, and where they differ from Windows:
   in memory that are not UTF-8 are `TOBII_SIGNING_KEY_BUFFER_FAILED`, where
   the DLL hands them to its PEM reader as they are, which answers
   `TOBII_SIGNING_SIGN_PEM_FAILED` or `TOBII_SIGNING_VERIFY_PEM_FAILED` when it
-  finds no key in them. And, **by mistake**, signing with an RSA key of 488
-  bits or fewer, too short for the padding, aborts the calling process, where
-  the DLL fails with one of its OpenSSL codes (inferred); verifying under such
-  a key answers `TOBII_SIGNING_NOT_VERIFIED`.
+  finds no key in them. Signing with an RSA key of 488 bits or fewer, too
+  short for the padding, is `TOBII_SIGNING_SIGN_FINAL_FAILED`, the step at
+  which the DLL's OpenSSL fails such a key (inferred); up to 0.4.1 it aborted
+  the calling process. Verifying under such a key answers
+  `TOBII_SIGNING_NOT_VERIFIED`.

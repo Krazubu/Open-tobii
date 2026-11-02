@@ -59,8 +59,9 @@ typedef enum tobii_signing_result_t
  * bits. Key bytes in key_data that are not UTF-8 are
  * TOBII_SIGNING_KEY_BUFFER_FAILED, which the DLL answers only when it cannot
  * allocate. The DLL, through OpenSSL, reads more keys than these (inferred).
- * A known defect: signing with a key of 488 bits or fewer aborts the calling
- * process, where the DLL fails with one of its own codes (inferred). */
+ * Signing with a key of 488 bits or fewer, too short for the padding, is
+ * TOBII_SIGNING_SIGN_FINAL_FAILED, the step at which the DLL fails such a
+ * key (inferred); up to 0.4.1 it aborted the calling process. */
 
 /* Sign data_size bytes of data with the PEM private key (PKCS#8 or PKCS#1)
  * in the file key_path, or held in key_data. The base64 signature goes to

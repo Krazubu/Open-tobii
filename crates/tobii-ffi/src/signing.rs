@@ -59,9 +59,6 @@
 //! - Key bytes held in memory that are not UTF-8 are
 //!   `TOBII_SIGNING_KEY_BUFFER_FAILED`, where the DLL hands them to its PEM
 //!   reader as they are (see `pem_from_memory`).
-//! - A known defect: signing with a key of 488 bits or fewer aborts the
-//!   calling process, where the DLL fails with one of its OpenSSL codes
-//!   (inferred; see `sign_with`).
 
 use std::ffi::{CStr, c_char, c_int, c_void};
 use std::{fs, slice};
@@ -120,11 +117,8 @@ pub const TOBII_SIGNING_SIGN_INIT_FAILED: SigningResult = 9;
     reason = "used only by the C header and the tests; a value of the DLL's enum that its OpenSSL path can return and this implementation cannot; declared so the C header carries the whole numbering"
 )]
 pub const TOBII_SIGNING_SIGN_UPDATE_FAILED: SigningResult = 0xa;
-/// The signature could not be produced.
-#[allow(
-    dead_code,
-    reason = "used only by the C header and the tests; a value of the DLL's enum that its OpenSSL path can return and this implementation cannot; declared so the C header carries the whole numbering"
-)]
+/// The signature could not be produced: here, a key too short for the
+/// padding (see `sign_with`).
 pub const TOBII_SIGNING_SIGN_FINAL_FAILED: SigningResult = 0xb;
 /// The signature buffer could not be allocated.
 #[allow(
@@ -211,15 +205,15 @@ fn private_key(pem: &str) -> Option<RsaPrivateKey> {
 /// to `signature`, with its length (the encoded length, without the
 /// terminator) to `signature_size`.
 ///
-/// A known defect, not a choice: a key of 488 bits or fewer is too short
-/// for the padding of a SHA-256 digest (`pkcs1v15_sign_pad` in rsa 0.9.10's
-/// `src/algorithms/pkcs1v15.rs` wants a modulus of 62 bytes or more), and
-/// `Signer::sign` turns that error into a panic (signature 2.2.0 implements
-/// it as `try_sign` and `expect`), which aborts the calling process at the
-/// `extern "C"` boundary. The DLL fails such a key with one of its OpenSSL
-/// codes (inferred). Calling `try_sign` and answering a code would fix it;
-/// it has not been done. Verifying under such a key answers
-/// [`TOBII_SIGNING_NOT_VERIFIED`] and does not abort.
+/// A key of 488 bits or fewer is too short for the padding of a SHA-256
+/// digest (`pkcs1v15_sign_pad` in rsa 0.9.10's `src/algorithms/pkcs1v15.rs`
+/// wants a modulus of 62 bytes or more): that is
+/// [`TOBII_SIGNING_SIGN_FINAL_FAILED`], the step at which the DLL's OpenSSL
+/// fails such a key, in `EVP_DigestSignFinal` (inferred). It takes
+/// `try_sign`: `Signer::sign` panics on the error (signature 2.2.0 makes it
+/// `try_sign` and `expect`), and a panic aborts the calling process at the
+/// `extern "C"` boundary, which is what libtobii did up to 0.4.1. Verifying
+/// under such a key answers [`TOBII_SIGNING_NOT_VERIFIED`].
 ///
 /// # Safety
 /// `signature` must be valid for writing [`SIGNATURE_BUFFER`] bytes and
@@ -234,7 +228,14 @@ unsafe fn sign_with(
     let Some(key) = private_key(pem) else {
         return pem_failed;
     };
-    let encoded = STANDARD.encode(SigningKey::<Sha256>::new(key).sign(data).to_vec());
+    let signed = match SigningKey::<Sha256>::new(key).try_sign(data) {
+        Ok(signed) => signed,
+        Err(error) => {
+            tracing::trace!(%error, "signing: the key cannot sign this digest");
+            return TOBII_SIGNING_SIGN_FINAL_FAILED;
+        }
+    };
+    let encoded = STANDARD.encode(signed.to_vec());
     // The DLL would run off the caller's buffer here; this does not.
     if encoded.len() >= SIGNATURE_BUFFER {
         tracing::trace!(
@@ -538,6 +539,47 @@ mod tests {
             TOBII_SIGNING_NOT_VERIFIED,
             crate::status::TOBII_ERROR_CALLBACK_IN_PROGRESS
         );
+    }
+
+    /// A key too short for the padding of a SHA-256 digest is refused with a
+    /// code, and leaves the caller's buffer and size alone: up to 0.4.1 it
+    /// aborted the calling process. 496 bits, a 62-byte modulus, is the
+    /// shortest that signs.
+    #[test]
+    fn a_key_too_short_for_the_padding_is_refused_not_a_crash() {
+        let pem_of = |bits: usize| {
+            RsaPrivateKey::new(&mut rand::thread_rng(), bits)
+                .expect("generate a key")
+                .to_pkcs8_pem(LineEnding::LF)
+                .expect("encode the private key")
+                .to_string()
+        };
+        let sign = |pem: &str| {
+            let data = b"the quick brown fox";
+            let mut signature = [0x55i8; SIGNATURE_BUFFER];
+            let mut size = usize::MAX;
+            // SAFETY: every pointer is to a live local of the right extent.
+            let result = unsafe {
+                tobii_signing_sign_with_private_key(
+                    data.as_ptr().cast(),
+                    data.len(),
+                    signature.as_mut_ptr().cast(),
+                    &raw mut size,
+                    pem.as_ptr().cast(),
+                    pem.len(),
+                )
+            };
+            (result, signature, size)
+        };
+
+        let (short, signature, size) = sign(&pem_of(488));
+        let (shortest, _, signed) = sign(&pem_of(496));
+
+        assert_eq!(short, TOBII_SIGNING_SIGN_FINAL_FAILED);
+        assert!(signature.iter().all(|b| *b == 0x55), "nothing written");
+        assert_eq!(size, usize::MAX, "nor the size");
+        assert_eq!(shortest, TOBII_SIGNING_OK);
+        assert!(signed > 0 && signed < SIGNATURE_BUFFER);
     }
 
     /// Sign with the key in memory, verify with the public key in memory:

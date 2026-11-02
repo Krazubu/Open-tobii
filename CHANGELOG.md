@@ -9,7 +9,7 @@ Stream Engine 4.25.0.3 and is held to them by `make verify-abi` on every
 change. Where an answer differs from the Windows DLL's, and the difference is
 known, docs/stream-engine-api.md says so, by entry point or by family: with
 its reason, or marked as a mistake where it is one, as the responsive gaze
-point and the abort on signing with a small key are.
+point is.
 
 ## Unreleased
 
@@ -29,6 +29,13 @@ point and the abort on signing with a small key are.
   and INSTALL.md said it was. Gaze is scaled to it: on a 24" 16:9 monitor,
   looking at the left and right edges reads about 0.08 and 0.92, on a 49"
   32:9 one about −0.44 and 1.44.
+- **Signing with an RSA key of 488 bits or fewer no longer aborts the
+  calling program.** `tobii_signing_sign` and
+  `tobii_signing_sign_with_private_key` answer
+  `TOBII_SIGNING_SIGN_FINAL_FAILED` for a key too short for the padding of a
+  SHA-256 digest, the step at which the DLL fails such a key (inferred), and
+  write nothing; until now the panic underneath aborted the process at the C
+  boundary.
 
 ### Added
 
