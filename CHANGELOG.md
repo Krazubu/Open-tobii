@@ -11,7 +11,7 @@ known, docs/stream-engine-api.md says so, by entry point or by family: with
 its reason, or marked as a mistake where it is one, as the responsive gaze
 point is.
 
-## Unreleased
+## 0.5.0 — 2026-11-02
 
 ### Upgrading
 
@@ -62,8 +62,9 @@ point is.
   calibration or the built-in one, your display area or the built-in one —
   whether it is plugged in, and what to do: calibrate, calibrate again with
   the display setup, or calibrate again because the display area changed
-  after the calibration was made. It reads files only, and starts no daemon.
-  The bug report template asks for it.
+  after the calibration was made. It reads the files tobiid reads, in the
+  environment systemd starts tobiid with, and starts no daemon. The bug
+  report template asks for it.
 
 ### Removed
 
@@ -83,6 +84,16 @@ point is.
   recipe's) ask each user who wants gaze on the screen to calibrate, and
   say who does not need to. A release's page now carries its section of
   this changelog and the same note, not only a compare link.
+- **The documentation states the 4.25 contract throughout.**
+  docs/stream-engine-api.md now says what each of the 48 names 4.25 added
+  answers, and names one behaviour as a mistake not yet fixed:
+  `tobii_responsive_gaze_point_subscribe` hands out the filtered gaze point,
+  not the responsive one. The 0.3.0 entry below is corrected in place: of
+  the 46 entry points 4.25 adds, seventeen give real answers and
+  twenty-nine are refusals.
+- SECURITY.md lists the built-in calibration, the author's own, among what
+  is known, and `tools/calibration.json`, a decoded copy of its points, is
+  gone from the tree.
 
 ## 0.4.1 — 2026-10-28
 

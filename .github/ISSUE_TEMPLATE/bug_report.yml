@@ -40,7 +40,7 @@ body:
     attributes:
       label: What the tracker runs on
       description: |
-        `tobii-calibrate --status` (releases after 0.4.1): your calibration and
+        `tobii-calibrate --status` (0.5.0 and later): your calibration and
         display area, or the built-in ones. Gaze that lands away from where
         you look is usually one of these.
       render: text
