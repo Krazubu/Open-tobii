@@ -41,7 +41,10 @@ const DEVICE_URL: &std::ffi::CStr = c"tobii-ffi://tobiid";
 /// `tobii_hardware_configuration_t` keeps 4.1.0.3's two entries and 2472
 /// bytes where 4.25.0.3's holds four (3960 bytes, inferred). What 4.25 adds
 /// over 4.1 and an ET5 cannot answer is refused, as the DLL itself refuses it
-/// for a tracker it drives without the Tobii service; the README lists those.
+/// for a tracker it drives without the Tobii service, but for absolute eye
+/// openness, whose support the DLL answers from uninitialised stack, and the
+/// ambient light level's unsubscribe, which it may answer
+/// `TOBII_ERROR_NOT_SUBSCRIBED` (see `internal`); the README lists those.
 const API_VERSION: Version = Version {
     major: 4,
     minor: 25,

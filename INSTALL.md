@@ -594,9 +594,9 @@ TOBII_IMAGE83_DEBUG=1 ./target/release/tobii-opentrack
   started as the Stream Engine starts it, `tobii_image_collection_subscribe`;
   the ET5 refuses it, so it answers `TOBII_ERROR_INTERNAL`, as the Stream
   Engine does, and no frame is ever delivered), notifications (display
-  area, calibration, pause, faults and warnings), device info (the public
-  and the internal one, `tobii_get_device_info_internal`), track box,
-  display area (get and set — kept across re-inits and, like the Stream
+  area, calibration, pause, power save, faults and warnings), device info
+  (the public and the internal one, `tobii_get_device_info_internal`), track
+  box, display area (get and set — kept across re-inits and, like the Stream
   Engine, across sessions), mounting, states, capabilities, 2-D calibration
   (discarding a point too), a device/host clock pair (`tobii_timesync`),
   the tracker's stream catalogue (`tobii_enumerate_stream_types`) and its

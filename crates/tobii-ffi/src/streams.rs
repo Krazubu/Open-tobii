@@ -136,10 +136,16 @@ stream_pair! {
     /// 4.25 adds), meant to carry the tracker's own "Remote Gaze Point
     /// Responsive Combined", stream 0x83 key `0x20` with validity `0x1f`:
     /// the unfiltered point the ET5 sends beside the filtered one
-    /// `tobii_gaze_point_subscribe` delivers. That the DLL hands out that key
-    /// is inferred from the names alone: its stream check sends 12 to the
-    /// same tracker stream as the gaze point (0x1800915c0), and the image has
-    /// no handler of its own for it.
+    /// `tobii_gaze_point_subscribe` delivers. What 4.25 hands out for it is
+    /// not known. Its stream check answers for 12 as for the gaze point
+    /// (0x1800915c0), but the subscribe maps 12 to PRP stream 0x1d,
+    /// `RESPONSIVE_GAZE_POINT` (0x18008f005), and for a tracker the DLL
+    /// drives itself its legacy-TTP module answers that stream's subscribe
+    /// with the stub 0x1800a1cb0 (`mov $0x3,%eax; ret`,
+    /// `PLATMOD_ERROR_NOT_SUPPORTED`; case at 0x180109300), as it does for
+    /// the device log and the 3-D facial landmarks. So for an ET5 the DLL
+    /// most likely refuses the subscribe; that it hands out key `0x20` behind
+    /// the Tobii service is inferred from the names alone.
     ///
     /// What this hands out is not that point but, by mistake, the filtered
     /// one: a known defect, not a choice. It is the combined point of the

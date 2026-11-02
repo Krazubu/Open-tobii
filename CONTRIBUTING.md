@@ -13,8 +13,8 @@ it on every pull request.
 
 Where an answer cannot be the Stream Engine's, it diverges **deliberately and
 in writing**. [docs/stream-engine-api.md](docs/stream-engine-api.md) says
-what each of the 199 entry points answers and where that differs from
-Windows. `tools/abi/README.md` carries 4.1.0.3's derivation, with the DLL
+what the entry points answer, by name or by family, and where that differs
+from Windows. `tools/abi/README.md` carries 4.1.0.3's derivation, with the DLL
 addresses it came from, and the doc comments in `crates/tobii-ffi/` (`src/`
 and `include/tobii/`) carry that of what 4.25.0.3 adds or changes, with the
 DLL addresses where they give them. A change that adds a divergence is

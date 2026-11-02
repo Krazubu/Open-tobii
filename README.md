@@ -199,7 +199,8 @@ are answered locally because the Stream Engine answers them locally too,
 listing the illumination modes, arming and disarming remote wake (the tracker
 refuses all four itself, so the answer is right) and the configuration key,
 which needs a realm no entry point can open — and twenty-nine of the
-forty-six names 4.25 adds are refusals too (Limitations says which, and why).
+forty-six entry points 4.25 adds are refusals too (Limitations says which,
+and why).
 
 Where an answer cannot be the Stream Engine's it diverges deliberately: the
 combined-gaze HID track box is the tracker's measured one rather than the
@@ -207,12 +208,12 @@ constants the DLL holds, both custom-command payloads are bounded where the
 DLL bounds neither, seven entry points keep the DLL's licence refusal, and
 seven of the thirteen notification types are delivered.
 
-**[docs/stream-engine-api.md](docs/stream-engine-api.md) says what every entry
-point answers and why**, divergence by divergence, the 48 names 4.25 added
-included. `tools/abi/README.md` carries 4.1.0.3's derivation, with the DLL
-addresses each claim was read at, and the comments in `crates/tobii-ffi/`
-(`src/` and `include/tobii/`) carry that of what 4.25.0.3 adds or changes,
-with the DLL addresses where they give them.
+**[docs/stream-engine-api.md](docs/stream-engine-api.md) says what the entry
+points answer and why**, by name or by family, divergence by divergence, the
+48 names 4.25 added included. `tools/abi/README.md` carries 4.1.0.3's
+derivation, with the DLL addresses each claim was read at, and the comments in
+`crates/tobii-ffi/` (`src/` and `include/tobii/`) carry that of what 4.25.0.3
+adds or changes, with the DLL addresses where they give them.
 
 The headers are in `crates/tobii-ffi/include/tobii/` (installed to
 `/usr/include/tobii/` by the packages, `/usr/local/include/tobii/` by `make

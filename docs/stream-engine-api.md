@@ -509,12 +509,12 @@ Where the answers come from, and where they differ from Windows:
   `tobii_warnings_subscribe` hand their callback the text of every list the
   tracker announces (3200/3210), changed or not, as the Stream Engine passes
   those on as notifications, each right after its `FAULTS_CHANGED` or
-  `WARNINGS_CHANGED` notification (`crates/tobiid/src/frames.rs`,
-  `device.rs`). Subscribing starts the daemon's notification stream and asks
-  for nothing else, so nothing comes at subscribe; the getters answer the list
-  standing then. The DLL most likely hands a new subscriber that list at once,
-  or an empty string while it holds none: its tracker module calls the
-  subscriber before the subscribe returns, and that this reaches the
+  `WARNINGS_CHANGED` notification (`crates/tobiid/src/frames.rs`, and this
+  crate's `device.rs`). Subscribing starts the daemon's notification stream
+  and asks for nothing else, so nothing comes at subscribe; the getters answer
+  the list standing then. The DLL most likely hands a new subscriber that list
+  at once, or an empty string while it holds none: its tracker module calls
+  the subscriber before the subscribe returns, and that this reaches the
   application's callback is inferred (`faults.rs`). An ET5 has never been seen
   announcing either list, so neither callback has been seen to run on one.
 - **Presence, as 4.25 serves it.** `tobii_presence_subscribe` delivers what
@@ -539,11 +539,14 @@ Where the answers come from, and where they differ from Windows:
   `tobii_gaze_point_subscribe` delivers, valid whenever the tracker's validity
   word is not 0, where the gaze point is valid only when it is 1, and nothing
   at all from a `tobiid` too old to stamp that record with the host time. It
-  **differs by mistake** from what the stream is for, as its header says, and,
-  inferred from the names alone, from what the DLL hands out (`streams.rs`,
-  `tobii/tobii_streams.h`); handing out key 0x20 needs `tobiid` to send it,
-  which no daemon message does. Subscribing to it alone starts the daemon's
-  raw-gaze stream, as `tobii_gaze_raw_subscribe` does.
+  **differs by mistake** from what the stream is for, as its header says;
+  handing out key 0x20 needs `tobiid` to send it, which no daemon message
+  does. The DLL itself most likely refuses the subscribe for a tracker it
+  drives, an ET5 included: its stream check answers for 12 as for the gaze
+  point, but its legacy-TTP module answers the subscribe of PRP stream 0x1d,
+  which 12 maps to, with a not-supported stub, as for the device log
+  (`streams.rs`, `tobii/tobii_streams.h`). Subscribing to it alone starts the
+  daemon's raw-gaze stream, as `tobii_gaze_raw_subscribe` does.
 - **Output frequency.** `tobii_output_frequency_subscribe` calls its receiver
   once, with 33 Hz, on the calling thread before it returns, and never again:
   the ET5 runs at that one frequency (*Notifications*). The DLL's source for

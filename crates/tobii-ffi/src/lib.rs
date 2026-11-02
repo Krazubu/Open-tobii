@@ -73,22 +73,23 @@
 //!   not hold them, and the two retrieves because its tracker module offers
 //!   neither of the PRP commands they look for (see `diagnostics` and
 //!   `display_id`).
-//! - **What 4.25 adds** — of the 46 names Stream Engine 4.25 adds (its two
-//!   renames are internal stream 5's subscribe and unsubscribe, above),
-//!   seventeen give real answers. Ten come from the daemon: the tracker's
-//!   fault and warning lists and their streams (see `faults`), the presence
-//!   stream and the responsive gaze point, which by a known defect carries
-//!   the filtered point (see `streams`). Seven are answered locally: the
-//!   output frequency as a stream, whose receiver is called once, from inside
-//!   the subscribe, with the 33 Hz the ET5 never changes (see `config`),
-//!   whether the extended lens configuration can be written, never, as for
-//!   the basic one (see `wearable`), and the four signing calls, which need
-//!   no device (see `signing`). The other twenty-nine answer
-//!   `TOBII_ERROR_NOT_SUPPORTED` once their arguments check out, as the DLL
-//!   does for a tracker it drives itself (read or inferred, see `internal`
-//!   and `wearable`), but for absolute eye openness, whose support it answers
-//!   from uninitialised stack, and the ambient light level's unsubscribe,
-//!   which it may answer `TOBII_ERROR_NOT_SUBSCRIBED`.
+//! - **What 4.25 adds** — of the 46 entry points Stream Engine 4.25 adds (its
+//!   two renames are internal stream 5's subscribe and unsubscribe, above),
+//!   seventeen give real answers. Ten come from the daemon: the tracker's fault
+//!   and warning lists and their streams (see `faults`), the presence stream
+//!   and the responsive gaze point, which by a known defect carries the
+//!   filtered point, where the DLL, driving an ET5 itself, most likely refuses
+//!   the subscribe (see `streams`). Seven are answered locally: the output
+//!   frequency as a stream, whose receiver is called once, from inside the
+//!   subscribe, with the 33 Hz the ET5 never changes (see `config`), whether
+//!   the extended lens configuration can be written, never, as for the basic
+//!   one (see `wearable`), and the four signing calls, which need no device
+//!   (see `signing`). The other twenty-nine answer `TOBII_ERROR_NOT_SUPPORTED`
+//!   once their arguments check out, as the DLL does for a tracker it drives
+//!   itself (read or inferred, see `internal` and `wearable`), but for absolute
+//!   eye openness, whose support it answers from uninitialised stack, and the
+//!   ambient light level's unsubscribe, which it may answer
+//!   `TOBII_ERROR_NOT_SUBSCRIBED`.
 //!
 //! Seven entry points answer the DLL's licence refusal. What the Stream Engine
 //! reserves for a higher feature group or an extra licence (gaze data,

@@ -36,6 +36,9 @@ None of these is vendored. Put the DLL anywhere and pass `--dll` (or set
     tools/abi/dll_abi.py dis tobii_calibration_collect_data_2d
     tools/abi/dll_abi.py callsites 0xeb70
 
+The tool reads the DLL `--dll` names before the command, else `$TOBII_DLL`,
+else `~/Work/tobii-sys/tobii_stream_engine.dll`; give all three of the lines
+above 4.25.0.3's, or `args` writes another DLL's reads under its name.
 `exports --check` and `headers` hold the library to 4.25.0.3, so give them
 that DLL: against it both pass (199 exports listed and exported, 199
 prototypes without an error). Against 4.1.0.3, `exports --check` reports the

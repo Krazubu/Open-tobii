@@ -1396,7 +1396,7 @@ const fn custom_stream_status(result: u32) -> Status {
 ///
 /// The answers come in the DLL's order (0x18014c060), once the callback flag,
 /// the device and a null callback (`TOBII_ERROR_INVALID_PARAMETER`) have been
-/// checked, the flag first here, as everywhere: `TOBII_ERROR_NOT_SUPPORTED`
+/// checked, the flag first here, as usual: `TOBII_ERROR_NOT_SUPPORTED`
 /// when the tracker's catalogue does not list 0x1770;
 /// `TOBII_ERROR_ALREADY_SUBSCRIBED` for a stream subscribed already;
 /// `TOBII_ERROR_TOO_MANY_SUBSCRIBERS` once 256 are; then, as the DLL's
@@ -1563,7 +1563,7 @@ const fn image_collection_status(result: u32) -> Status {
 /// internal stream helper 0x18015bbf0 and its subscribe worker
 /// 0x1801536d0), once the callback flag, the device and a null callback
 /// (`TOBII_ERROR_INVALID_PARAMETER`) have been checked, the flag first here,
-/// as everywhere: `TOBII_ERROR_NOT_SUPPORTED` when the tracker's catalogue
+/// as usual: `TOBII_ERROR_NOT_SUPPORTED` when the tracker's catalogue
 /// does not list 0x508; `TOBII_ERROR_ALREADY_SUBSCRIBED` while image
 /// collection is subscribed; then what came of the start, or the daemon's
 /// own refusal of the request, passed on. A start whose tracker was lost or

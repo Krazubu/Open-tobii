@@ -508,30 +508,32 @@ unsafe fn per_eye(export: &'static str, device: *mut Device) -> Status {
 }
 
 /// Is `eyes` a `tobii_enabled_eye_t`? Stream Engine 4.25 added this check to
-/// the three per-eye exports, ahead of the device, where 4.1 never looked at
-/// the value at all: `tobii_calibration_discard_data_per_eye_2d`
-/// (0x18007e8b0) tests it with the chain `testl %r9d,%r9d` (0x18007e8e0),
-/// `subl $0x1` (0x18007e8e5), `cmpl $0x1` (0x18007e8eb), so LEFT, RIGHT and
-/// BOTH pass and anything else falls to `TOBII_ERROR_INVALID_PARAMETER` —
-/// unlogged there, and logged at line 0x73 in
-/// `tobii_calibration_collect_data_per_eye_2d`. Since the three accept
-/// exactly `TOBII_ENABLED_EYE_LEFT`, `_RIGHT` and `_BOTH`, so does this.
+/// the three per-eye exports, ahead of the device (4.1 checks the value only in
+/// its module functions, past licence and capability gates a consumer ET5 never
+/// passes: 0x18017835b, 0x180177e56):
+/// `tobii_calibration_discard_data_per_eye_2d` (0x18007e8b0) tests it with the
+/// chain `testl %r9d,%r9d` (0x18007e8e0), `subl $0x1` (0x18007e8e5),
+/// `cmpl $0x1` (0x18007e8eb), so LEFT, RIGHT and BOTH pass and anything else
+/// falls to `TOBII_ERROR_INVALID_PARAMETER` — unlogged there, and logged at
+/// line 0x73 in `tobii_calibration_collect_data_per_eye_2d`. Since the three
+/// accept exactly `TOBII_ENABLED_EYE_LEFT`, `_RIGHT` and `_BOTH`, so does this.
 fn is_enabled_eye(eyes: u32) -> bool {
     eyes == TOBII_ENABLED_EYE_LEFT
         || eyes == TOBII_ENABLED_EYE_RIGHT
         || eyes == TOBII_ENABLED_EYE_BOTH
 }
 
-/// The argument checks 4.25 runs **before** it looks at the device, and 4.1
-/// ran not at all — so they answer `TOBII_ERROR_INVALID_PARAMETER` with no
-/// session, no handle and nothing sent, where this library used to answer
-/// `TOBII_ERROR_CALLBACK_IN_PROGRESS`, `TOBII_ERROR_CALIBRATION_NOT_STARTED`
-/// or `TOBII_ERROR_NOT_SUPPORTED`. Taken on because the library reports
-/// 4.25.0.3; the three sites in 4.25 are `testq %rdx,%rdx` at 0x18007e505
-/// (`compute_and_apply_per_eye`'s out pointer), the fifth-argument load and
-/// test at 0x18007e1fa/0x18007e20a (`collect_data_per_eye_2d`, line 0x5f)
-/// and the enum chain of [`is_enabled_eye`]. Called under Wine, 4.25 trips
-/// its own log block for each while 4.1 runs on into its callback guard.
+/// The argument checks 4.25 runs **before** it looks at the device, where 4.1
+/// checks only the eyes, past its gates, and never the pointer — so they answer
+/// `TOBII_ERROR_INVALID_PARAMETER` with no session, no handle and nothing sent,
+/// where this library used to answer `TOBII_ERROR_CALLBACK_IN_PROGRESS`,
+/// `TOBII_ERROR_CALIBRATION_NOT_STARTED` or `TOBII_ERROR_NOT_SUPPORTED`. Taken
+/// on because the library reports 4.25.0.3; the three sites in 4.25 are
+/// `testq %rdx,%rdx` at 0x18007e505 (`compute_and_apply_per_eye`'s out
+/// pointer), the fifth-argument load and test at 0x18007e1fa/0x18007e20a
+/// (`collect_data_per_eye_2d`, line 0x5f) and the enum chain of
+/// [`is_enabled_eye`]. Called under Wine, 4.25 trips its own log block for each
+/// while 4.1 runs on into its callback guard.
 ///
 /// `eyes` is checked only where the export takes one, `out` only where it
 /// writes one; `out` is compared with null and never written, as in both

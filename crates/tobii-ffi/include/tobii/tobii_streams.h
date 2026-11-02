@@ -70,15 +70,16 @@ TOBII_API tobii_error_t TOBII_CALL tobii_gaze_point_unsubscribe( tobii_device_t*
 /* The responsive combined gaze point, tobii_stream_t 12, added in Stream
  * Engine 4.25 for the tracker's own unfiltered combined point, which an ET5
  * sends beside the filtered one tobii_gaze_point_subscribe delivers (stream
- * 0x83 key 0x20; that the DLL hands out that key is inferred). By a mistake
- * not yet fixed, libtobii.so hands out the filtered point instead (key
- * 0x1c), the combined point of the daemon's raw gaze record: the point and
- * timestamp tobii_gaze_point_subscribe delivers, valid whenever the
- * tracker's validity word is not 0, where the gaze point is valid only when
- * it is 1. A daemon too old to stamp that record with the host time feeds it
- * nothing. Same shape as tobii_gaze_point_t: the timestamp is on the
- * tobii_system_clock clock, the position is normalised display coordinates
- * and unclamped. */
+ * 0x83 key 0x20, inferred from the names; for a tracker it drives itself the
+ * DLL most likely refuses the subscribe, its legacy-TTP module handing PRP
+ * stream 0x1d to a not-supported stub). By a mistake not yet fixed,
+ * libtobii.so hands out the filtered point instead (key 0x1c), the combined
+ * point of the daemon's raw gaze record: the point and timestamp
+ * tobii_gaze_point_subscribe delivers, valid whenever the tracker's validity
+ * word is not 0, where the gaze point is valid only when it is 1. A daemon
+ * too old to stamp that record with the host time feeds it nothing. Same
+ * shape as tobii_gaze_point_t: the timestamp is on the tobii_system_clock
+ * clock, the position is normalised display coordinates and unclamped. */
 typedef struct tobii_responsive_gaze_point_t
 {
     int64_t timestamp_us;

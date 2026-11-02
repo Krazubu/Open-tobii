@@ -6,10 +6,10 @@ release's; the full history is in the git log.
 This project keeps no compatibility promise of its own below 1.0, but
 `libtobii.so` does: it presents exactly the 199 entry points of Tobii's
 Stream Engine 4.25.0.3 and is held to them by `make verify-abi` on every
-change. Where an answer differs from the Windows DLL's it is written down in
-docs/stream-engine-api.md, which covers all 199 entry points: with its
-reason, or marked as a mistake where it is one, as the responsive gaze point
-and the abort on signing with a small key are.
+change. Where an answer differs from the Windows DLL's, and the difference is
+known, docs/stream-engine-api.md says so, by entry point or by family: with
+its reason, or marked as a mistake where it is one, as the responsive gaze
+point and the abort on signing with a small key are.
 
 ## Unreleased
 
@@ -184,14 +184,15 @@ checking it for null, where 4.1 and this library answer
 
 The library now follows Stream Engine **4.25.0.3** instead of 4.1.0.3.
 `libtobii.so` exports its whole surface — **199 entry points** against 4.1's
-153 — and `tobii_get_api_version` reports 4.25.0.3. Of the 46 names 4.25 adds
-(two more are renames), sixteen are implemented and thirty are refusals the
-DLL itself gives for a tracker it drives without the Tobii service; the README
-lists which. A client built against 4.1 is unaffected unless it calls the
-undocumented `tobii_multiple_faces_position_subscribe` or `_unsubscribe`:
-4.25 renamed them (below), so such a client no longer links. No other 4.1
-entry point changed its signature, and the only struct that changed for it
-was already wrong (below).
+153 — and `tobii_get_api_version` reports 4.25.0.3. Of the 46 entry points
+4.25 adds (two more names are renames), seventeen give real answers and
+twenty-nine are refusals the DLL itself gives for a tracker it drives without
+the Tobii service, absolute eye openness aside (docs/stream-engine-api.md);
+the README lists which. A client built against 4.1 is unaffected unless it
+calls the undocumented `tobii_multiple_faces_position_subscribe` or
+`_unsubscribe`: 4.25 renamed them (below), so such a client no longer links.
+No other 4.1 entry point changed its signature, and the only struct that
+changed for it was already wrong (below).
 
 ### Entry points added from 4.25
 
@@ -199,16 +200,18 @@ was already wrong (below).
   `tobii_get_faults` and `tobii_get_warnings` write the same 512-byte text
   `tobii_get_state_string` gives for `TOBII_STATE_FAULT` and
   `TOBII_STATE_WARNING`, and `tobii_faults_subscribe` /
-  `tobii_warnings_subscribe` hand a subscriber the whole list on every change,
-  from the notifications the daemon already sent.
+  `tobii_warnings_subscribe` hand a subscriber the whole list each time the
+  tracker announces it, from the notifications the daemon already sent.
 - **`tobii_output_frequency_subscribe` / `_unsubscribe`.** 4.25 serves the
   output frequency as a stream beside the getter. The receiver is called once,
   from inside the subscribe, with the frequency the tracker runs at; the ET5
   never changes it, so there is no second call.
 - **`tobii_responsive_gaze_point_subscribe` / `_unsubscribe`**, the stream
-  4.25 numbers 12: the tracker's own less filtered combined gaze point, which
-  it sends beside the one `tobii_gaze_point_subscribe` delivers (stream 0x83
-  key 0x20). `tobii_stream_supported` now reports 12 supported.
+  4.25 numbers 12, meant to carry the tracker's own less filtered combined
+  gaze point, which it sends beside the one `tobii_gaze_point_subscribe`
+  delivers (stream 0x83 key 0x20); by a mistake not yet fixed it carries the
+  filtered one (docs/stream-engine-api.md). `tobii_stream_supported` now
+  reports 12 supported.
 
 - **4.25's presence stream**, `tobii_presence_subscribe` / `_unsubscribe`:
   the same status and timestamp `tobii_user_presence_subscribe` delivers, in a
@@ -237,15 +240,16 @@ was already wrong (below).
 
 ### Entry points that exist and refuse
 
-Thirty of 4.25's additions answer `TOBII_ERROR_NOT_SUPPORTED` once their
+Twenty-nine of 4.25's additions answer `TOBII_ERROR_NOT_SUPPORTED` once their
 arguments check out, which is what the DLL answers for a tracker it drives
-itself: the wearable image, wearable diagnostics image and wearable entrance
-pupil streams, the primary camera image, the 3-D facial landmarks and their
-group enumeration, the device log, absolute eye openness, proximity data
-collection, the algorithm-debug stream, the ambient light level (whose handler
-in 4.25 is itself a stub returning the same), the four remote-camera calls,
-the extended lens configuration trio and the two algo-box commands. None of
-them invents a record: where the audit could not name a field — the 40-byte
+itself, absolute eye openness aside: the wearable image, wearable diagnostics
+image and wearable entrance pupil streams, the primary camera image, the 3-D
+facial landmarks and their group enumeration, the device log, absolute eye
+openness, proximity data collection, the algorithm-debug stream, the ambient
+light level (whose handler in 4.25 is itself a stub returning the same), the
+four remote-camera calls, reading and writing the extended lens configuration,
+`tobii_force_frame_sequence` and `tobii_set_algo_box_mode`. None of them
+invents a record: where the audit could not name a field — the 40-byte
 primary-camera record, absolute eye openness, the two words of
 `tobii_force_frame_sequence` — nothing is declared for it.
 

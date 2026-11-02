@@ -230,7 +230,7 @@ mod tests {
             assert_eq!(
                 tobii_display_id_subscribe(d, ptr::null(), ptr::null_mut()),
                 TOBII_ERROR_CALLBACK_IN_PROGRESS,
-                "the flag beats even a null argument, as everywhere here"
+                "the flag beats even a null argument, as usual here"
             );
             assert_eq!(
                 tobii_get_display_id(d, ptr::null_mut()),
