@@ -27,7 +27,7 @@ Run the same gates CI runs:
 
 ```sh
 make check        # rustfmt, clippy -D warnings, the whole test suite, the docs,
-                  # and the checks of the udev rules and the .desktop file
+                  # and the checks of the udev rules and the .desktop files
 make verify-abi   # the 199 exports, and a C program compiled against the headers
 ```
 
