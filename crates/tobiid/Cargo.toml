@@ -17,5 +17,8 @@ tobii-proto.workspace = true
 tobii-usb.workspace = true
 tracing.workspace = true
 
+[dev-dependencies]
+tobii-calib = { workspace = true, features = ["testing"] }
+
 [lints]
 workspace = true

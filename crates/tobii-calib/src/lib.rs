@@ -11,5 +11,7 @@
 pub mod blob;
 pub mod display;
 pub mod store;
+#[cfg(any(test, feature = "testing"))]
+pub mod testing;
 
 pub use blob::{BlobError, BlobHeader, BlobInfo, PointRecord, STIMULUS_POINTS};

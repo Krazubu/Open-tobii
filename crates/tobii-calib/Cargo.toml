@@ -15,5 +15,11 @@ tobii-ipc.workspace = true
 [dev-dependencies]
 tobii-proto.workspace = true
 
+# `testing`: made-up blobs for the workspace's tests (src/testing.rs), so
+# that none needs a real person's calibration. Only dev-dependencies turn it
+# on, so it never reaches libtobii.so or the daemon.
+[features]
+testing = []
+
 [lints]
 workspace = true

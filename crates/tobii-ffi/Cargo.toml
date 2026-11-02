@@ -25,6 +25,7 @@ tracing.workspace = true
 
 [dev-dependencies]
 rand.workspace = true
+tobii-calib = { workspace = true, features = ["testing"] }
 tobii-proto.workspace = true
 
 [lints]

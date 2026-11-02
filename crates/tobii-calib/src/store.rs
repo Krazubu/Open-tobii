@@ -321,12 +321,12 @@ mod tests {
     fn save_load_rotate_remove() {
         let scratch = Scratch::new("store");
         let path = scratch.0.join("tobii").join("calibration.bin");
-        let first = crate::blob::tests::embedded_blob();
+        let first = crate::testing::device_like(7);
         let mut second = first.clone();
         second[20..24].copy_from_slice(&42u32.to_le_bytes());
 
         assert!(load(&path).expect("absent is fine").is_none());
-        assert_eq!(save(&path, &first).expect("save").id, 1_904_654_973);
+        assert_eq!(save(&path, &first).expect("save").id, 7);
         assert_eq!(save(&path, &second).expect("save").id, 42);
 
         let (loaded, info) = load(&path).expect("load").expect("present");

@@ -1153,12 +1153,10 @@ pub(crate) mod tests {
         setup_with(tag, device_blob())
     }
 
-    /// The calibration the device computes: the one built into the init
-    /// replay, with an id of its own.
+    /// The calibration the device computes: a made-up one, shaped as the
+    /// tracker's are, and not the one built into the init replay.
     pub(crate) fn device_blob() -> Vec<u8> {
-        let mut blob = tobii_usb::calibration::embedded_blob().expect("blob");
-        blob[20..24].copy_from_slice(&0x1234_5678u32.to_le_bytes());
-        blob
+        tobii_calib::testing::device_like(0x1234_5678)
     }
 
     /// As [`setup`], with the device computing `blob`.

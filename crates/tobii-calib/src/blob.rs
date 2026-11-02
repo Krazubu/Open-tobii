@@ -315,8 +315,10 @@ pub(crate) mod tests {
     use tobii_proto::calibration::blob_from_payload;
     use tobii_proto::protocol::{parse_init_packets, parse_message};
 
-    /// The calibration the init replay uploads (the author's).
-    pub(crate) fn embedded_blob() -> Vec<u8> {
+    /// The calibration the init replay uploads (the author's): read only to
+    /// check the format against a tracker's own blob. Every other test takes
+    /// a made-up one ([`crate::testing`]).
+    fn embedded_blob() -> Vec<u8> {
         let text = include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../tobii-usb/init_packets_ep.txt"
@@ -348,15 +350,15 @@ pub(crate) mod tests {
             );
             assert_eq!((record.a_status, record.b_status), (1, 1));
         }
-        // Values from tools/calibration.json (offsets 658563 / 658587),
-        // one tracker's blob as `extract-calibration --json` dumps it.
+        // Two of the second record's values (blob offsets 658563 / 658587),
+        // as `extract-calibration --json` dumps the blob.
         assert!((records[1].a[0] - 0.501_088_9).abs() < 1e-6);
         assert!((records[1].b[1] - 0.128_229_7).abs() < 1e-6);
     }
 
     #[test]
     fn rejects_damaged_blobs() {
-        let blob = embedded_blob();
+        let blob = crate::testing::device_like(1);
         assert!(matches!(
             validate(&blob[..blob.len() - 1]),
             Err(BlobError::Trailer { .. })
@@ -377,9 +379,9 @@ pub(crate) mod tests {
     const B: usize = 24;
     const B_STATUS: usize = 32;
 
-    /// The embedded blob with `bytes` written at each offset into record `i`.
+    /// A made-up blob with `bytes` written at each offset into record `i`.
     fn edited(i: usize, edits: &[(usize, &[u8])]) -> Vec<u8> {
-        let mut blob = embedded_blob();
+        let mut blob = crate::testing::device_like(1);
         let total = usize::try_from(header(&blob).expect("header").total).expect("fits");
         let record = total + 8 + i * RECORD_LEN;
         for (offset, bytes) in edits {

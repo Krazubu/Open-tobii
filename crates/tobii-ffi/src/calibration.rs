@@ -633,28 +633,15 @@ mod tests {
         unsafe { (*ud.cast::<Vec<CalibrationPointData>>()).push(*p) };
     }
 
-    fn embedded_blob() -> Vec<u8> {
-        use tobii_proto::protocol::{parse_init_packets, parse_message};
-        let text = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../tobii-usb/init_packets_ep.txt"
-        ));
-        let packets = parse_init_packets(text).expect("init file");
-        let body: Vec<u8> = packets[38..200]
-            .iter()
-            .flat_map(|p| p.data[8..].iter().copied())
-            .collect();
-        let prefixed = [&[0u8; 8][..], &body].concat();
-        let payload = parse_message(&prefixed).expect("header").payload;
-        tobii_proto::calibration::blob_from_payload(payload)
-            .expect("blob")
-            .to_vec()
+    /// A calibration as the tracker hands one out: made up, 14 points.
+    fn device_blob() -> Vec<u8> {
+        tobii_calib::testing::device_like(0x1234_5678)
     }
 
     #[test]
     #[allow(clippy::float_cmp)] // reason: compares rounded values
-    fn parses_the_embedded_calibration() {
-        let blob = embedded_blob();
+    fn parses_a_calibration() {
+        let blob = device_blob();
         let mut api: *mut Api = ptr::null_mut();
         let mut points: Vec<CalibrationPointData> = Vec::new();
         // SAFETY: live locals; `collect` matches the receiver contract.
@@ -736,7 +723,7 @@ mod tests {
     #[test]
     #[allow(clippy::float_cmp)] // reason: the points are copied, not computed
     fn parse_reports_each_eyes_own_status() {
-        let mut blob = embedded_blob();
+        let mut blob = device_blob();
         let records = tobii_calib::blob::points(&blob).expect("points");
         let total =
             usize::try_from(tobii_calib::blob::header(&blob).expect("header").total).expect("fits");
@@ -775,7 +762,7 @@ mod tests {
 
     #[test]
     fn parse_reports_a_failed_eye_and_passes_its_mapping_on() {
-        let mut blob = embedded_blob();
+        let mut blob = device_blob();
         let total =
             usize::try_from(tobii_calib::blob::header(&blob).expect("header").total).expect("fits");
         let first = total + 8;
@@ -888,7 +875,7 @@ mod tests {
     /// what parsing inside `tobii_calibration_retrieve`'s receiver needs.
     #[test]
     fn parse_runs_inside_a_callback() {
-        let blob = embedded_blob();
+        let blob = device_blob();
         let mut api: *mut Api = ptr::null_mut();
         let mut points: Vec<CalibrationPointData> = Vec::new();
         // SAFETY: live locals; `blob` is readable for its length and
@@ -982,7 +969,7 @@ mod tests {
 
     #[test]
     fn parse_refuses_data_that_is_not_a_calibration() {
-        let blob = embedded_blob();
+        let blob = device_blob();
         let total =
             usize::try_from(tobii_calib::blob::header(&blob).expect("header").total).expect("fits");
         let mut negative = blob.clone();
@@ -1183,7 +1170,7 @@ mod tests {
     /// test fails before it touches that device again.
     #[test]
     fn a_retrieve_receiver_is_refused_what_a_callback_is() {
-        let blob = embedded_blob();
+        let blob = device_blob();
         let d = Box::into_raw(Box::new(device_with(0, blob.clone())));
         let other = Box::into_raw(Box::new(device_with(0, vec![1])));
         let mut api: *mut Api = ptr::null_mut();
