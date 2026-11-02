@@ -103,7 +103,9 @@ stream_pair! {
     /// eye's place in the camera image and its distance from the tracker,
     /// normalised to about `0..1` per axis (see `tobii_streams.h`).
     tobii_eye_position_normalized_subscribe / tobii_eye_position_normalized_unsubscribe: eye_position, EyePairFn;
-    /// User presence, reported once on subscribe and then on change.
+    /// User presence, reported once on subscribe and then on change; not on
+    /// subscribe while `tobii_presence_subscribe` already holds presence on
+    /// the device (see there).
     tobii_user_presence_subscribe / tobii_user_presence_unsubscribe: presence, PresenceFn;
     /// The Stream Engine's head pose, from the tracker's IR images (see
     /// [`HeadPose`](crate::types::HeadPose)): absolute, in the display
@@ -121,14 +123,35 @@ stream_pair! {
     /// than a stream, and the current reference marks it deprecated; here
     /// both are fed from the daemon's one presence stream, so a subscriber
     /// to either sees the same changes.
+    ///
+    /// So a subscribe to either while the other already holds presence on
+    /// the device is not told the presence standing then, and hears of it at
+    /// its next change: the device's mask is unchanged, so nothing is asked
+    /// of tobiid (`Device::subscribe`), which reports the standing presence
+    /// only to a connection newly asking for it. Nothing chose that. In the
+    /// DLL the two are separate subscriptions, this one to its property 0x14
+    /// (0x18007c365).
     tobii_presence_subscribe / tobii_presence_unsubscribe: presence_sample, PresenceSampleFn;
     /// The responsive combined gaze point (`tobii_stream_t` 12, the stream
-    /// 4.25 adds): the tracker's own "Remote Gaze Point Responsive
-    /// Combined", stream 0x83 key `0x20` with validity `0x1f`, which reaches
-    /// this library in the daemon's `GAZE_RAW` message as the combined point
-    /// — the less filtered point the ET5 sends beside the one
-    /// `tobii_gaze_point_subscribe` delivers. It rides on the same daemon
-    /// stream as raw gaze, so subscribing to it alone starts that stream.
+    /// 4.25 adds), meant to carry the tracker's own "Remote Gaze Point
+    /// Responsive Combined", stream 0x83 key `0x20` with validity `0x1f`:
+    /// the unfiltered point the ET5 sends beside the filtered one
+    /// `tobii_gaze_point_subscribe` delivers. That the DLL hands out that key
+    /// is inferred from the names alone: its stream check sends 12 to the
+    /// same tracker stream as the gaze point (0x1800915c0), and the image has
+    /// no handler of its own for it.
+    ///
+    /// What this hands out is not that point but, by mistake, the filtered
+    /// one: a known defect, not a choice. It is the combined point of the
+    /// daemon's `GAZE_RAW` record, which tobiid fills, as the Stream Engine
+    /// fills its own record, from key `0x1c` with validity `0x1b`
+    /// (`crates/tobiid/src/frames.rs`). So it delivers the point and host
+    /// time the gaze point does, but counts any validity word other than 0
+    /// as valid, where the gaze point takes only 1, and a record from a
+    /// tobiid that sends no host time feeds it nothing. Handing out key
+    /// `0x20` needs tobiid to send it: no daemon message carries it. It rides
+    /// on the same daemon stream as raw gaze, so subscribing to it alone
+    /// starts that stream.
     tobii_responsive_gaze_point_subscribe / tobii_responsive_gaze_point_unsubscribe: responsive_gaze, GazePointFn;
     /// The user position guide: the tracker's own User 3D Position Guide,
     /// each eye's place in the camera image and a depth that rises with its

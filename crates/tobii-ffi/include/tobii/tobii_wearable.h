@@ -1,7 +1,8 @@
 /* tobii/tobii_wearable.h — head-mounted devices. Declared so wearable-aware
  * code builds; nothing here applies to the screen-based ET5.
- * tobii_lens_configuration_writable answers
- * TOBII_LENS_CONFIGURATION_NOT_WRITABLE. Every other entry point answers
+ * tobii_lens_configuration_writable and its extended form, which Stream
+ * Engine 4.25 adds, answer TOBII_LENS_CONFIGURATION_NOT_WRITABLE with
+ * TOBII_ERROR_NO_ERROR. Every other entry point answers
  * TOBII_ERROR_CALLBACK_IN_PROGRESS from inside a callback, then
  * TOBII_ERROR_INVALID_PARAMETER for a null device, callback or lens
  * configuration (the DLL checks those before the callback), and otherwise
@@ -142,8 +143,9 @@ typedef enum tobii_lens_configuration_writable_t
  * first two vectors sit at the basic struct's offsets. The basic getter does
  * not forward to it. Names of the members are ours; the DLL's thunk moves
  * twelve dwords and names nothing. No device advertises the property, so
- * libtobii.so answers TOBII_ERROR_NOT_SUPPORTED, as it does for the basic
- * one. */
+ * libtobii.so answers its get and set with TOBII_ERROR_NOT_SUPPORTED and its
+ * writability query with TOBII_LENS_CONFIGURATION_NOT_WRITABLE, as it does
+ * for the basic one. */
 typedef struct tobii_lens_configuration_extended_per_eye_t
 {
     float offset_mm_xyz[ 3 ];

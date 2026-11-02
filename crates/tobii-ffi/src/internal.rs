@@ -201,15 +201,20 @@ fn internal_stream_supported(device: &Device, stream: u32) -> bool {
 /// subscribes answer `TOBII_ERROR_NOT_SUPPORTED` (and warn of that daemon).
 ///
 /// 4.25's same check (0x180091180) adds one case to that switch, internal
-/// 0xa, the wearable entrance pupil position, and still has none for the
-/// other streams it gained. Its case is not a catalogue lookup but the
-/// licence gate at 0x18009ba00, which for a device below feature level 2 —
-/// a consumer ET5 is level 0 — returns `TOBII_ERROR_INSUFFICIENT_LICENSE`
-/// **without writing its out-parameter**, while the caller reads that
-/// parameter anyway (`cmpl $0x1,0x30(%rsp)` at 0x1800911bf) and so answers
-/// from uninitialised stack. libtobii answers 0xa as unsupported, which is
-/// the only deterministic answer and what the gate's own licence check
-/// means.
+/// 0x10, absolute eye openness (the `cmp $0xa` at 0x1800911b0 comes after
+/// the switch has taken 6 off the id), and still has none for the other
+/// streams it gained, the wearable entrance pupil position (0xa) among
+/// them. Its case is not a catalogue lookup but a licence gate,
+/// `platmod_ttp_stream_supported_absolute_eye_openness` in its log
+/// (0x18009ba00). For a device below licence level 2 — a consumer ET5 is
+/// level 0, as `licence_refused` in `stub.rs` derives for 4.1 (inferred for
+/// 4.25) — it returns `TOBII_ERROR_INSUFFICIENT_LICENSE` **without writing
+/// its out-parameter**, while the caller reads that parameter anyway
+/// (`cmpl $0x1,0x30(%rsp)` at 0x1800911bf) and so answers from
+/// uninitialised stack; at level 2 or more it answers from a word of its
+/// tracker module whose meaning is not known (`[module+0xa860]`,
+/// 0x18009ba8f). libtobii answers 0x10 as unsupported, which is the only
+/// deterministic answer and what the gate's own licence check means.
 /// On its PRP path, behind the Tobii service, the DLL never supports 0 or 1
 /// and answers 2..8 from the streams the service lists, never captured for
 /// an ET5.
@@ -337,8 +342,9 @@ refused_internal_streams! {
     /// `LOW_FREQUENCY_HEAD_POSITION`). What the DLL would deliver behind the
     /// Tobii service is described in `tobii_internal.h`.
     tobii_low_frequency_head_position_subscribe / tobii_low_frequency_head_position_unsubscribe: 4;
-    /// Internal stream 5, multiple faces position (the DLL's PRP stream 10,
-    /// `MULTIPLE_FACES_POSITION`).
+    /// Internal stream 5, multiple faces (the DLL's PRP stream 10,
+    /// `MULTIPLE_FACES`, which 4.1 named `MULTIPLE_FACES_POSITION`, as it
+    /// named this pair `tobii_multiple_faces_position_*`).
     tobii_multiple_faces_subscribe / tobii_multiple_faces_unsubscribe: 5;
     /// Internal stream 7, wearable limited image (the DLL's PRP stream 11,
     /// `WEARABLE_LIMITED_IMAGE`).
@@ -348,9 +354,10 @@ refused_internal_streams! {
     tobii_secondary_camera_image_subscribe / tobii_secondary_camera_image_unsubscribe: 8;
     // The internal streams Stream Engine 4.25 adds. Each is a stream of the
     // same class as those above — one the DLL serves behind the Tobii
-    // service, for hardware an ET5 is not — so each answers as they do, and
-    // the PRP stream ids are the ones 4.25's name table gives (4.1's PRP
-    // enum ends at 0x19, so every one of these is new there too).
+    // service, for hardware an ET5 is not, or, absolute eye openness, one
+    // whose support it gates on the licence — so each answers as they do,
+    // and the PRP stream ids are the ones 4.25's name table gives (4.1's
+    // PRP enum ends at 0x19, so every one of these is new there too).
     /// Internal stream 9, proximity data collection (PRP stream 0x1a,
     /// `PROXIMITY_DATA_COLLECTION`). 4.25's own legacy-TTP module refuses it
     /// outright, so `TOBII_ERROR_NOT_SUPPORTED` is what the DLL answers for
@@ -384,14 +391,24 @@ refused_internal_streams! {
     /// `TOBII_ERROR_NOT_SUPPORTED`. That check has two paths. With the DLL's
     /// own tracker module (`[dev+0x4e8]`), which is the path it takes for a
     /// tracker it drives itself and the one this library models, it is a
-    /// switch with cases for internal 0, 1, 2, 6 and 0xa only — 4.25 added
-    /// the case for 0xa and **no case for 0x10**, so the answer there is
-    /// always false. Without that module it maps the internal stream to a
-    /// PRP stream through the table at 0x180091310 (0x10 to 0x21) and
-    /// searches the tracker's catalogue for it (`[dev+0x9904]`, count at
-    /// `[dev+0x999c]`). Either way no record is ever built for an ET5, so
-    /// there is nothing to hand out and nothing of its layout to recover
-    /// from the subscribe path.
+    /// switch with cases for internal 0, 1, 2, 6 and 0x10 only: 4.25 added
+    /// the case for 0x10, the licence gate that answers from uninitialised
+    /// stack below licence level 2 (see `tobii_internal_stream_supported`),
+    /// so for a consumer ET5 the subscribe is `TOBII_ERROR_NOT_SUPPORTED`
+    /// unless that stack word happens to be 1, a case not traced further.
+    /// The unsubscribe (0x180077b80) hands the stream to 0x18008a040, which
+    /// asks the same check (0x18008a08b) before it looks for a subscription
+    /// (0x18008a254), so it answers `TOBII_ERROR_NOT_SUPPORTED` too, or,
+    /// when the word is 1 and nothing is subscribed,
+    /// `TOBII_ERROR_NOT_SUBSCRIBED` (0x18008d49f). Without that module the
+    /// check maps the internal stream to a PRP stream through the table at
+    /// 0x180091310 (0x10 to 0x21) and searches the tracker's catalogue for
+    /// it (`[dev+0x9904]`, count at `[dev+0x999c]`). libtobii refuses both
+    /// calls every time, which is what the gate's licence check means. The
+    /// module has a subscribe of its own for the stream (0x1800a9d90), but
+    /// the record the DLL would hand out is not known, and the ET5's own
+    /// "Absolute Eye Openness" columns are always -1.0 and invalid
+    /// (`tobii_proto::gaze83`): there is nothing to hand out.
     tobii_absolute_eye_openness_subscribe / tobii_absolute_eye_openness_unsubscribe: 0x10;
     /// Internal stream 0x12, the 3-D facial landmarks (PRP stream 0x25):
     /// a 3240-byte record of 200 landmarks.
@@ -418,6 +435,13 @@ pub extern "C" fn tobii_ambient_light_level_subscribe(
 
 /// Undo [`tobii_ambient_light_level_subscribe`]: `TOBII_ERROR_NOT_SUPPORTED`
 /// once the device checks out, as its subscribe never took.
+///
+/// The DLL's unsubscribe (0x180078360) hands property 0x18 to 0x18008b090,
+/// which answers the same for a device whose property list lacks it (looked
+/// up at 0x18008b0e2, refused at 0x18008b155), but for one that lists it
+/// goes on to look for the subscription and, finding none, answers
+/// `TOBII_ERROR_NOT_SUBSCRIBED` (0x18008b270). Whether an ET5's list holds
+/// 0x18 was not traced.
 #[unsafe(no_mangle)]
 pub extern "C" fn tobii_ambient_light_level_unsubscribe(device: *mut Device) -> Status {
     refused("tobii_ambient_light_level_unsubscribe", device, false)

@@ -1161,8 +1161,9 @@ pub(crate) struct Callbacks {
     /// The point the foveated gaze point holds, kept while nothing is
     /// subscribed to it, as the DLL keeps its own.
     pub(crate) foveated_point: FoveatedPoint,
-    /// Fed from raw gaze's combined point: the tracker's responsive combined
-    /// gaze, which 4.25 serves as `tobii_stream_t` 12 (see `streams`).
+    /// 4.25's `tobii_stream_t` 12, fed from raw gaze's combined point, which
+    /// is the tracker's filtered point (key 0x1c), not the responsive one
+    /// (key 0x20) the stream is for: a known defect (see `streams`).
     pub(crate) responsive_gaze: Slot<GazePointFn>,
     pub(crate) image: Slot<ImageFn>,
     pub(crate) notifications: Slot<NotificationsFn>,
@@ -2369,11 +2370,14 @@ impl Device {
                     // outlives the call.
                     call(|| unsafe { f(&raw const p, ud) });
                 }
-                // The responsive combined point rides on the same record
-                // (the frame's key 0x20 and its validity 0x1f). Its
-                // timestamp has to be on the host clock, as every stream's
-                // is, so a record from a tobiid that sends no host time
-                // feeds nothing rather than a device-clock time.
+                // The responsive gaze point rides on the same record: its
+                // combined point, which tobiid fills from the frame's
+                // filtered point (key 0x1c, validity 0x1b), not from the
+                // responsive one (key 0x20, validity 0x1f) the stream is
+                // for, a known defect (see `streams`). Its timestamp has to
+                // be on the host clock, as every stream's is, so a record
+                // from a tobiid that sends no host time feeds nothing rather
+                // than a device-clock time.
                 if let (Some((f, ud)), Some(timestamp_us)) =
                     (cb.responsive_gaze, record.timestamp_system_us)
                 {

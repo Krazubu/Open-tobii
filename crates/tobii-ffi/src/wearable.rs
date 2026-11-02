@@ -1,8 +1,9 @@
 //! `tobii_wearable.h`: head-mounted devices only. Nothing here applies to the
-//! screen-based ET5: the lens-configuration writability query answers "not
-//! writable", and every other entry point checks its arguments and then
-//! answers `TOBII_ERROR_NOT_SUPPORTED`, as the DLL does for an ET5 it drives
-//! itself.
+//! screen-based ET5: the two lens-configuration writability queries, 4.1's
+//! and 4.25's extended one, answer "not writable" with
+//! `TOBII_ERROR_NO_ERROR`, and every other entry point checks its arguments
+//! and then answers `TOBII_ERROR_NOT_SUPPORTED`, as the DLL does for an ET5
+//! it drives itself.
 //!
 //! The DLL refuses the three wearable streams in its stream checks, which on
 //! its own tracker module refuse the advanced and foveated streams outright

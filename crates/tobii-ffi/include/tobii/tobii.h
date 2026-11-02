@@ -445,8 +445,11 @@ TOBII_API tobii_error_t TOBII_CALL tobii_get_state_string( tobii_device_t* devic
  * two string states above, which give the same text: the fault list is the
  * DLL's property 0x15 and TOBII_STATE_FAULT, the warning list 0x16 and
  * TOBII_STATE_WARNING. The buffer must hold 512 bytes; the DLL's receiver
- * copies at most 511 and terminates. A subscriber is handed the whole list on
- * every change, and the string is valid for the call only. */
+ * copies at most 511 and terminates. A subscriber is handed the whole list
+ * each time the tracker announces one, changed or not (the FAULTS_CHANGED
+ * and WARNINGS_CHANGED notifications), and nothing at subscribe, where the
+ * DLL most likely hands it the list standing then (inferred); the string is
+ * valid for the call only. */
 TOBII_API tobii_error_t TOBII_CALL tobii_get_faults( tobii_device_t* device,
     tobii_state_string_t faults );
 TOBII_API tobii_error_t TOBII_CALL tobii_get_warnings( tobii_device_t* device,

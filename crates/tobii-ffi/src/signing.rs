@@ -44,6 +44,24 @@
 //! documented 640-byte buffer is `TOBII_SIGNING_BASE64_FAILED` instead of an
 //! overrun. The DLL also leaks the `EVP_PKEY` of both file-path variants;
 //! nothing here can leak.
+//!
+//! It also differs where nothing was chosen:
+//!
+//! - Only an unencrypted RSA key is read, PKCS#8 or PKCS#1 to sign and SPKI
+//!   to verify, and only as the one PEM block of its text, with nothing
+//!   after its END line but one line ending (pem-rfc7468 0.7.0's strict
+//!   grammar): trailing text, a blank line, or a NUL counted in
+//!   `key_data_size` makes it `TOBII_SIGNING_SIGN_PEM_FAILED` or
+//!   `TOBII_SIGNING_VERIFY_PEM_FAILED`. So does a public exponent of 2^33 or
+//!   more in either kind of key, or a public key of more than 4096 bits
+//!   (rsa 0.9.10's `RsaPublicKey::MAX_PUB_EXPONENT` and `MAX_SIZE`). The
+//!   DLL's OpenSSL reads more of these keys (inferred).
+//! - Key bytes held in memory that are not UTF-8 are
+//!   `TOBII_SIGNING_KEY_BUFFER_FAILED`, where the DLL hands them to its PEM
+//!   reader as they are (see `pem_from_memory`).
+//! - A known defect: signing with a key of 488 bits or fewer aborts the
+//!   calling process, where the DLL fails with one of its OpenSSL codes
+//!   (inferred; see `sign_with`).
 
 use std::ffi::{CStr, c_char, c_int, c_void};
 use std::{fs, slice};
@@ -63,8 +81,10 @@ pub type SigningResult = c_int;
 
 /// Signed or verified.
 pub const TOBII_SIGNING_OK: SigningResult = 0;
-/// The key bytes could not be taken as a key at all (the DLL's
-/// `BIO_new_mem_buf` failure).
+/// The key bytes could not be taken as a key at all. The DLL answers it
+/// when its `BIO_new_mem_buf` fails, which for a buffer its prologue has let
+/// through means a failed allocation; libtobii answers it for key bytes in
+/// memory that are not UTF-8 (see `pem_from_memory`).
 pub const TOBII_SIGNING_KEY_BUFFER_FAILED: SigningResult = 1;
 /// An argument the call requires was null.
 pub const TOBII_SIGNING_NULL_ARGUMENT: SigningResult = 2;
@@ -161,9 +181,17 @@ fn pem_from_path(path: &CStr, open: SigningResult, pem: SigningResult) -> Pem {
     }
 }
 
-/// The PEM text of a key held in memory, as the DLL's `BIO_new_mem_buf` pair
-/// reads it: bytes that are not UTF-8 hold no PEM, which is the buffer
-/// failure the DLL answers before it reaches `PEM_read_bio`.
+/// The PEM text of a key held in memory, or
+/// [`TOBII_SIGNING_KEY_BUFFER_FAILED`] for bytes that are not UTF-8.
+///
+/// That answer is libtobii's own, not the DLL's. The DLL's
+/// `BIO_new_mem_buf` (0x180128650, called at 0x180085042 and 0x180085332)
+/// fails only for a null buffer, which the prologue has already refused, or
+/// a failed allocation, and does not judge the bytes: it hands them to the
+/// PEM reader as they are (0x1800850da, 0x1800853ca), which answers
+/// `TOBII_SIGNING_SIGN_PEM_FAILED` (0x1800850e7) or
+/// `TOBII_SIGNING_VERIFY_PEM_FAILED` (0x1800853d7) when it finds no key in
+/// them.
 fn pem_from_memory(bytes: &[u8]) -> Pem {
     match std::str::from_utf8(bytes) {
         Ok(text) => Pem::Text(text.to_owned()),
@@ -182,6 +210,16 @@ fn private_key(pem: &str) -> Option<RsaPrivateKey> {
 /// Sign `data` with the private key in `pem` and write the base64 signature
 /// to `signature`, with its length (the encoded length, without the
 /// terminator) to `signature_size`.
+///
+/// A known defect, not a choice: a key of 488 bits or fewer is too short
+/// for the padding of a SHA-256 digest (`pkcs1v15_sign_pad` in rsa 0.9.10's
+/// `src/algorithms/pkcs1v15.rs` wants a modulus of 62 bytes or more), and
+/// `Signer::sign` turns that error into a panic (signature 2.2.0 implements
+/// it as `try_sign` and `expect`), which aborts the calling process at the
+/// `extern "C"` boundary. The DLL fails such a key with one of its OpenSSL
+/// codes (inferred). Calling `try_sign` and answering a code would fix it;
+/// it has not been done. Verifying under such a key answers
+/// [`TOBII_SIGNING_NOT_VERIFIED`] and does not abort.
 ///
 /// # Safety
 /// `signature` must be valid for writing [`SIGNATURE_BUFFER`] bytes and
@@ -250,8 +288,15 @@ fn verify_with(
 ///
 /// `signature` must point to [`SIGNATURE_BUFFER`] bytes: the call takes no
 /// capacity and the DLL writes that many. The signature is NUL-terminated
-/// here whenever it is written, which the DLL only manages for an encoded
-/// length of 477 or less.
+/// here whenever it is written. The DLL's encoder (0x18011ea90) writes no
+/// terminator, so its signature ends in a NUL only through the clearing of
+/// the 640 bytes this form does first (0x180084ef7..0x180084f02): while the
+/// raw signature is 477 bytes or less (636 encoded, a key of at most 3816
+/// bits). From 478 bytes the encoded signature fills all 640, and from 481
+/// (keys over 3840 bits) it runs past them; here any key over 3816 bits is
+/// `TOBII_SIGNING_BASE64_FAILED`. `tobii_signing_sign_with_private_key`
+/// clears nothing in the DLL, which therefore never terminates its
+/// signature.
 ///
 /// # Safety
 /// `data` must be null or valid for reading `data_size` bytes; `signature`

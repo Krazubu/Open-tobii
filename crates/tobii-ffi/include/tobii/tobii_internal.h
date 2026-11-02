@@ -409,9 +409,14 @@ TOBII_API tobii_error_t TOBII_CALL tobii_secondary_camera_image_unsubscribe( tob
  * tobii_image_*), the wearable diagnostics image (0xd -> 0x1e), the wearable
  * image (0xe -> 0x1f), the device log (0xf -> 0x20, not the TBI5LOG1 blob
  * tobii_logs_retrieve fetches), absolute eye openness (0x10 -> 0x21) and the
- * 3-D facial landmarks (0x12 -> 0x25). Each is refused for an ET5 exactly as
- * the streams above are, so no record type is declared and the callbacks stay
- * void const*: nothing is ever delivered. */
+ * 3-D facial landmarks (0x12 -> 0x25). Each is refused for an ET5 as the
+ * streams above are, 4.25's support check (0x180091180) having no case for
+ * it, but for absolute eye openness: the check's one new case is a licence
+ * gate (0x18009ba00) that, below licence level 2 (a consumer ET5 is at 0,
+ * inferred from 4.1), returns without writing the answer the check then
+ * reads, so the DLL answers from uninitialised stack. libtobii.so answers
+ * TOBII_ERROR_NOT_SUPPORTED for it every time. No record type is declared
+ * and the callbacks stay void const*: nothing is ever delivered. */
 TOBII_API tobii_error_t TOBII_CALL tobii_proximity_data_collection_subscribe( tobii_device_t* device, void const* callback, void* user_data );
 TOBII_API tobii_error_t TOBII_CALL tobii_proximity_data_collection_unsubscribe( tobii_device_t* device );
 TOBII_API tobii_error_t TOBII_CALL tobii_wearable_entrance_pupil_position_subscribe( tobii_device_t* device, void const* callback, void* user_data );
