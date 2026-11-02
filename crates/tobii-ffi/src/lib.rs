@@ -166,17 +166,20 @@
 //!
 //! An entry point that takes a device handle checks the callback first, then
 //! a null device, then its other arguments (`TOBII_ERROR_INVALID_PARAMETER`
-//! both). Three check arguments first: `tobii_calibration_start` its eye,
-//! `tobii_calibration_apply` its blob and `tobii_wait_for_callbacks` its
-//! count and null handles. The DLL checks the handle, and sometimes more,
-//! first, so the two differ only for an invalid argument passed from inside a
-//! callback. Two check no callback, as in 4.1: `tobii_set_display_info`,
-//! which checks its pointers only (where 4.25 refuses a call from inside a
-//! callback once they check out), and `tobii_set_fw_upgrade_allowed`, which
-//! checks nothing, in 4.25 too. The DLL also refuses only calls into the API
-//! instance whose callbacks run, where here any is refused, and it counts the
-//! receiver of `tobii_enumerate_local_device_urls(_ex)` as a callback, where
-//! here its `# Safety` section forbids re-entry.
+//! both). Six check arguments first: `tobii_calibration_start` its eye,
+//! `tobii_calibration_apply` its blob, `tobii_wait_for_callbacks` its count
+//! and null handles, and the three per-eye calibration calls the out pointer
+//! and the eye selection they take, as 4.25 does (see `calibration`). The
+//! DLL checks the handle, and sometimes more, before the callback flag, so
+//! the two differ only for an invalid argument passed from inside a callback.
+//! Two check no callback, as in 4.1: `tobii_set_display_info`, which checks
+//! its pointers only (where 4.25 refuses a call from inside a callback once
+//! they check out), and `tobii_set_fw_upgrade_allowed`, which checks
+//! nothing, in 4.25 too; nor do the three stubs, which read no argument (see
+//! `stub`). The DLL also refuses only calls into the API instance whose
+//! callbacks run, where here any is refused, and it counts the receiver of
+//! `tobii_enumerate_local_device_urls(_ex)` as a callback, where here its
+//! `# Safety` section forbids re-entry.
 //!
 //! `tobii_calibration_parse` checks in the DLL's order: a null `api` or
 //! `data`, a `data_size` under 8 or a null `receiver`

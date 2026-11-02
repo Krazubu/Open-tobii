@@ -470,10 +470,10 @@ pub extern "C" fn tobii_calibration_discard_data_3d(
 
 /// The answer of the per-eye calibration calls for an ET5:
 /// `TOBII_ERROR_CALIBRATION_NOT_STARTED` outside this handle's own session,
-/// as the DLL answers before anything else once the device checks out, and
+/// as 4.1 answers before anything else once the device checks out, and
 /// `TOBII_ERROR_NOT_SUPPORTED` inside it, with nothing sent to the daemon.
 ///
-/// The DLL's three exports (0x180148e70, 0x1801486c0, 0x180147fb0) check a
+/// 4.1's three exports (0x180148e70, 0x1801486c0, 0x180147fb0) check a
 /// null device, then the callback flag, take their API mutex, and answer
 /// `TOBII_ERROR_CALIBRATION_NOT_STARTED` while the device's session flag is
 /// clear (0x180148ed9, 0x180148729, 0x18014800f; see
@@ -485,9 +485,10 @@ pub extern "C" fn tobii_calibration_discard_data_3d(
 /// cached at connect) has per-eye calibration, id 3, other than "true"
 /// (0x1801782fb, 0x180177df4, 0x18017798e). The ET5's is "false". libtobii
 /// gates nothing on a licence, so it answers what follows the licence check;
-/// for the consumer group it reports, the DLL would answer
-/// `TOBII_ERROR_INSUFFICIENT_LICENSE`. Neither reads the point or the eyes
-/// before that, nor checks or writes the output.
+/// for the consumer group it reports, 4.1 would answer
+/// `TOBII_ERROR_INSUFFICIENT_LICENSE`. None of 4.1's three reads the point or
+/// the eyes before that, nor checks or writes the output; 4.25's check the
+/// out pointer and the eyes first, as [`per_eye_argument`] does here.
 ///
 /// # Safety
 /// `device` must be null or a live handle from `tobii_device_create` that is

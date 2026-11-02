@@ -61,9 +61,12 @@ and I want to hear about it.
   own command channel. Any process of the user can therefore send the tracker
   arbitrary vendor commands — again the account boundary, and the same thing
   the vendor's own SDK offers.
-- The research tools under `tobii5-init-replay` can write to the tracker. They
-  are dry-run by default and refuse anything outside a closed whitelist, but
-  they are developer tools and are not installed by the packages.
+- The research tools under `tobii5-init-replay` can write to the tracker.
+  Only `state-probe` is dry-run by default: it sends nothing without `--run`,
+  and its own commands come from a closed whitelist. Every tool that opens the
+  tracker writes to it at once, and most first replay an init capture, which
+  sets a calibration and a display area. They are developer tools and are not
+  installed by the packages.
 
 ## Supported versions
 

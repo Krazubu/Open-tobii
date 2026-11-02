@@ -603,8 +603,17 @@ TOBII_IMAGE83_DEBUG=1 ./target/release/tobii-opentrack
   streams' columns (`tobii_enumerate_stream_type_columns`), internal-stream
   support (the IR image, and the custom stream and image collection while
   that catalogue lists them, as the Stream Engine answers for an ET5,
-  `tobii_internal_stream_supported`), pause and resume, and the device
-  name. `tobii_hardware_configuration_get` is provisional: the ET5 has
+  `tobii_internal_stream_supported`), pause and resume, power save (entered
+  and left, with its state and remote wake's), the tracker's extension lists
+  (empty on an ET5), the device name, whether the tracker reports gaze over
+  HID and the track box it reports it in, and an application's own command
+  to the tracker (`tobii_send_custom_command`). Of the forty-six entry
+  points Stream Engine 4.25 adds, seventeen give real answers too: the fault
+  and warning lists and their streams, 4.25's presence stream, the
+  responsive gaze point (though, by a mistake not yet fixed, it carries the
+  filtered point), the output-frequency stream, whether the extended lens
+  configuration can be written (never), and the four signing calls.
+  `tobii_hardware_configuration_get` is provisional: the ET5 has
   reported no hardware configuration on Linux, so it returns
   `TOBII_ERROR_NOT_SUPPORTED`.
   Timestamps are the host clock `tobii_system_clock` reads (`CLOCK_MONOTONIC`),
@@ -613,11 +622,15 @@ TOBII_IMAGE83_DEBUG=1 ./target/release/tobii-opentrack
   "Timestamps"); gaze data and `tobii_timesync` keep the tracker's time too,
   and raw gaze has only the tracker's time, though the daemon sends the
   host time beside it for the foveated rendering gaze point made from it.
-  Everything the ET5 was never observed doing (wearable, face id,
-  illumination, power, firmware, diagnostics, licence storage on the device,
-  3-D and per-eye calibration, calibration stimulus points, the internal
-  low-frequency head, multiple faces, wearable limited image and secondary
-  camera image streams) returns `TOBII_ERROR_NOT_SUPPORTED`. For the wearable
+  What the ET5 refuses (remote wake, reading and listing the illumination
+  modes, the configuration key, the diagnostics image, retrieving its
+  diagnostic images or logs, the display id) and everything it was never
+  observed doing (wearable, face id, firmware, licence storage on the
+  device, 3-D and per-eye calibration, calibration stimulus points, the
+  internal low-frequency head, multiple faces, wearable limited image and
+  secondary camera image streams) return `TOBII_ERROR_NOT_SUPPORTED`, and so
+  do the other twenty-nine entry points 4.25 adds (docs/stream-engine-api.md,
+  *What 4.25 added*, says what each answers). For the wearable
   entry points, the digital sync port, face id, 3-D and per-eye calibration,
   the stimulus points and those five streams that is the Stream Engine's own
   answer without Tobii's service, for a tracker it drives itself through its
@@ -626,10 +639,15 @@ TOBII_IMAGE83_DEBUG=1 ./target/release/tobii-opentrack
   `TOBII_ERROR_CALIBRATION_NOT_STARTED` outside it); its answer behind the
   service was never captured. For the face types, which the Stream Engine asks
   the tracker for, and licence storage, which it offers a tracker with
-  persistent storage, it is inferred. Usage statistics
-  (`tobii_send_statistics`) answer `TOBII_ERROR_NOT_AVAILABLE`, as the Stream
-  Engine does without Tobii's Stream Engine Services. No licence is checked:
-  what the Stream Engine reserves for its professional, config or internal
+  persistent storage, it is inferred. Seven entry points keep the Stream
+  Engine's refusal of a consumer ET5, `TOBII_ERROR_INSUFFICIENT_LICENSE`,
+  which it gives without asking the tracker: setting the illumination mode,
+  enabling an extension, clean IR's subscribe and unsubscribe, dumping the
+  diagnostic images, reading diagnostics data and opening a realm. Usage
+  statistics (`tobii_send_statistics`) and reading the display info answer
+  `TOBII_ERROR_NOT_AVAILABLE`, as the Stream Engine does without Tobii's
+  Stream Engine Services. Beyond those seven, no licence is checked: what
+  the Stream Engine reserves for its professional, config or internal
   feature groups, or for an additional-features licence (the IR image), works
   too. Raw gaze is one such: the Stream Engine serves it only to its internal
   feature group, and only without Tobii's service (for any URL, libtobii's

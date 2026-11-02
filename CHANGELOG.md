@@ -187,9 +187,11 @@ The library now follows Stream Engine **4.25.0.3** instead of 4.1.0.3.
 153 — and `tobii_get_api_version` reports 4.25.0.3. Of the 46 names 4.25 adds
 (two more are renames), sixteen are implemented and thirty are refusals the
 DLL itself gives for a tracker it drives without the Tobii service; the README
-lists which. A client built against 4.1 is unaffected: no 4.1 entry point
-changed its signature, and the only struct that changed for it was already
-wrong (below).
+lists which. A client built against 4.1 is unaffected unless it calls the
+undocumented `tobii_multiple_faces_position_subscribe` or `_unsubscribe`:
+4.25 renamed them (below), so such a client no longer links. No other 4.1
+entry point changed its signature, and the only struct that changed for it
+was already wrong (below).
 
 ### Entry points added from 4.25
 

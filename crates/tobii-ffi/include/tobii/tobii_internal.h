@@ -874,6 +874,11 @@ TOBII_API tobii_error_t TOBII_CALL tobii_get_gaze_hid_enabled( tobii_device_t* d
 TOBII_API tobii_error_t TOBII_CALL tobii_get_combined_gaze_hid_track_box( tobii_device_t* device, tobii_track_box_t* track_box );
 TOBII_API tobii_error_t TOBII_CALL tobii_get_display_info( tobii_device_t* device, tobii_display_info_t* display_info );
 TOBII_API tobii_error_t TOBII_CALL tobii_logs_retrieve( tobii_device_t* device, void const* receiver, void* user_data );
+/* TOBII_ERROR_INSUFFICIENT_LICENSE once the callback flag, the device, a
+ * non-null key and a key_size positive as a signed word check out, as the
+ * DLL answers a consumer ET5 before it contacts the tracker; the key is
+ * never read. */
+TOBII_API tobii_error_t TOBII_CALL tobii_open_realm( tobii_device_t* device, uint32_t realm, void const* key, uint32_t key_size );
 /* An application's own command to the tracker. `command` never reaches the
  * tracker: the Stream Engine hard-codes its command id (5000) and uses this
  * number only as a gate, refusing anything but 0 with
@@ -887,12 +892,13 @@ TOBII_API tobii_error_t TOBII_CALL tobii_logs_retrieve( tobii_device_t* device, 
 TOBII_API tobii_error_t TOBII_CALL tobii_send_custom_command( tobii_device_t* device, uint32_t command, void const* data, size_t size, tobii_data_receiver_t receiver, void* user_data );
 TOBII_API tobii_error_t TOBII_CALL tobii_set_display_id( tobii_device_t* device, tobii_display_id_t const display_id );
 
-/* Everything below: NOT IMPLEMENTED, returns TOBII_ERROR_NOT_SUPPORTED. */
+/* Everything below: NOT IMPLEMENTED, returns TOBII_ERROR_NOT_SUPPORTED (remote
+ * wake once the callback flag and its device check out, as both DLLs check
+ * them). */
 
 TOBII_API tobii_error_t TOBII_CALL tobii_enumerate_illumination_modes( tobii_device_t* device, tobii_illumination_mode_receiver_t receiver, void* user_data );
 TOBII_API tobii_error_t TOBII_CALL tobii_get_configuration_key( tobii_device_t* device, void* value, char const* key );
 TOBII_API tobii_error_t TOBII_CALL tobii_get_illumination_mode( tobii_device_t* device, tobii_illumination_mode_t* mode );
-TOBII_API tobii_error_t TOBII_CALL tobii_open_realm( tobii_device_t* device, uint32_t realm, void const* key, uint32_t key_size );
 TOBII_API tobii_error_t TOBII_CALL tobii_remote_wake_activate( tobii_device_t* device );
 TOBII_API tobii_error_t TOBII_CALL tobii_remote_wake_deactivate( tobii_device_t* device );
 

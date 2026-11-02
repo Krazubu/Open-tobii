@@ -227,7 +227,7 @@ prototype declares or a float/integer position disagrees.
   clears; the callback flag is not set, so the receiver may call back in,
   though dev+0x4e0 is still held. On the ET5 the two words are 0 and 1 and
   the second string is empty in every column. libtobii checks the callback
-  flag first, as everywhere, and no licence; it maps the type with the same
+  flag first, as usual, and no licence; it maps the type with the same
   table, refusing 10 before it asks, and answers from tobiid's
   `STREAM_COLUMNS`: the columns the tracker listed answering the 1210 of
   tobiid's last init that got an answer (one that lost it keeps the one
@@ -315,7 +315,7 @@ prototype declares or a float/integer position disagrees.
   `TOBII_ERROR_CALLBACK_IN_PROGRESS` inside a callback, and otherwise writes
   the check's answer under dev+0x4e0 and returns `TOBII_ERROR_NO_ERROR`
   (0x18014cc40..0x18014cc74): it never fails once its arguments check out.
-  libtobii checks the callback flag first, as everywhere, then answers 2
+  libtobii checks the callback flag first, as usual, then answers 2
   and 6 from the catalogue tobiid reports (`STREAM_TYPES`, asked once per
   connection and kept with the one the custom stream's and image
   collection's exports check, but asked again while tobiid has none),
@@ -677,7 +677,7 @@ prototype declares or a float/integer position disagrees.
   reconnect (0x180159cc0, called at 0x18014395b) subscribes every entry of
   the list again through the module (0x18015a094..0x18015a0d0) and fails
   unless each comes to 0 or 4 (0x18015a0b9, 0x18015a29b). libtobii checks
-  the callback flag first, as everywhere, then answers in the same order
+  the callback flag first, as usual, then answers in the same order
   from the catalogue tobiid reports (`STREAM_TYPES`, asked once per
   connection, and again while tobiid has none) and the same list rules,
   and has tobiid hold 0x1770 for the connection (`CATALOGUE_STREAM_START`),
@@ -748,7 +748,7 @@ prototype declares or a float/integer position disagrees.
   inferred), which the DLL takes for `INTERNAL`, and sends no frame; it
   takes the 1230. The DLL's reconnect subscribes the slot again through the
   module (0x18015a030..0x18015a05b) and fails unless that comes to 0 or 4
-  (0x18015a045). libtobii checks the callback flag first, as everywhere,
+  (0x18015a045). libtobii checks the callback flag first, as usual,
   then answers in the same order from the catalogue tobiid reports
   (`STREAM_TYPES`, asked as for the custom stream), has tobiid hold 0x508 for
   the connection (`CATALOGUE_STREAM_START`), which starts it with the 1220
@@ -818,8 +818,9 @@ prototype declares or a float/integer position disagrees.
   (the copier 0x1800013a0 takes states 0, 1, 2, 3 and 7), and so is any
   state above 7. libtobii answers both flags from the last init's 1490 with
   the 3020s and 3030s since folded in, and 4, 5 and above 7 as the DLL does.
-  It checks the callback flag before a null `value`, as every entry point of
-  this crate does, where the DLL checks `value` first (0x1801429fa, before
+  It checks the callback flag before a null `value`, as all but a few of
+  libtobii's entry points that take a device do (`crates/tobii-ffi/src/lib.rs`
+  names them), where the DLL checks `value` first (0x1801429fa, before
   0x18015d3a3).
 
   The other seven call their tracker module directly (no PRP property),
