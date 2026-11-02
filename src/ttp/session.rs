@@ -197,14 +197,38 @@ fn vendor_control_init(usb: &DeviceHandle<GlobalContext>) -> rusb::Result<()> {
 /// responses (0x52) to their waiter by sequence, streams (0x53) and
 /// notifications (0x4e) to the inbox.
 fn reader_loop(usb: &DeviceHandle<GlobalContext>, shared: &Shared) {
+    let debug = std::env::var("PRP_DEBUG").is_ok();
     let mut reasm = BulkReassembler::new();
     let mut buf = vec![0u8; 128 * 1024];
     let mut done: Vec<DeviceMessage> = Vec::new();
+    let mut errors = 0u32;
     loop {
         let n = match usb.read_bulk(EP_IN, &mut buf, Duration::from_millis(1000)) {
-            Ok(n) => n,
+            Ok(n) => {
+                errors = 0;
+                n
+            }
             Err(rusb::Error::Timeout) => continue,
-            Err(_) => return,
+            // The device being gone is terminal; other errors (seen in a VM's
+            // WinUSB) must not kill the reader, or the stream stops after a few
+            // frames. Log, reset the reassembler, and keep reading.
+            Err(rusb::Error::NoDevice) => {
+                if debug {
+                    eprintln!("ttp reader: device gone, stopping");
+                }
+                return;
+            }
+            Err(e) => {
+                errors += 1;
+                if debug && errors <= 5 {
+                    eprintln!("ttp reader: bulk IN error {e} (#{errors}), continuing");
+                }
+                reasm = BulkReassembler::new();
+                if errors > 200 {
+                    return;
+                }
+                continue;
+            }
         };
         reasm.push_into(&buf[..n], &mut done);
         for msg in done.drain(..) {

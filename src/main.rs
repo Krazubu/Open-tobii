@@ -248,33 +248,37 @@ fn ttp_probe() {
             Err(e) => log!("{name}: {e}"),
         }
     }
-    // Start the gaze stream and decode one frame, to confirm the live
-    // TTP->values path the PRP translator relies on.
+    // Start the gaze stream and watch it for several seconds: does the device
+    // stream 0x500 continuously with our driving?
     let _ = session.start_stream(ttp::protocol::STREAM_ID_GAZE);
-    thread::sleep(Duration::from_millis(400));
-    let mut count = 0;
-    let mut shown = false;
-    if let Some(rx) = streams {
-        while let Ok(msg) = rx.try_recv() {
-            count += 1;
-            if shown {
-                continue;
-            }
-            if let Some(m) = parse_message(&msg) {
-                if let Some(g) = ttp::gaze83::decode_gaze_frame(&m) {
-                    let l = &g.left;
-                    log!(
-                        "gaze t={}us L point valid={} display=({:.3},{:.3}) pupil={:.2}mm guide valid={} ({:.3},{:.3},{:.3})",
-                        g.device_ts_us, l.gaze_point_norm.valid, l.gaze_point_norm.value[0], l.gaze_point_norm.value[1],
-                        l.pupil_diameter_mm.value, l.position_guide.valid,
-                        l.position_guide.value[0], l.position_guide.value[1], l.position_guide.value[2],
-                    );
-                    shown = true;
+    let Some(rx) = streams else { return };
+    let start = Instant::now();
+    let (mut gaze, mut other, mut shown) = (0u64, 0u64, false);
+    let mut by_id: std::collections::BTreeMap<u32, u64> = std::collections::BTreeMap::new();
+    while start.elapsed() < Duration::from_secs(8) {
+        match rx.recv_timeout(Duration::from_millis(500)) {
+            Ok(msg) => {
+                let Some(m) = parse_message(&msg) else { continue };
+                *by_id.entry(m.id).or_default() += 1;
+                if m.id == ttp::protocol::STREAM_ID_GAZE {
+                    gaze += 1;
+                    if !shown {
+                        if let Some(g) = ttp::gaze83::decode_gaze_frame(&m) {
+                            let l = &g.left;
+                            log!("first gaze t={}us Lpoint valid={} ({:.3},{:.3}) pupil={:.2}", g.device_ts_us, l.gaze_point_norm.valid, l.gaze_point_norm.value[0], l.gaze_point_norm.value[1], l.pupil_diameter_mm.value);
+                            shown = true;
+                        }
+                    }
+                } else {
+                    other += 1;
                 }
             }
+            Err(_) => {}
         }
     }
-    log!("streams/notifications received: {count}");
+    let secs = start.elapsed().as_secs_f64();
+    log!("over {secs:.1}s: {gaze} gaze (0x500) = {:.1}/s, {other} other", gaze as f64 / secs);
+    log!("by stream id: {by_id:?}");
 }
 
 fn open_device() -> rusb::Result<DeviceHandle<GlobalContext>> {
