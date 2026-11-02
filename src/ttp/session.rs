@@ -144,24 +144,57 @@ impl Session {
     /// `0x51` command packet is followed by waiting for its response so the
     /// device stays in step, as the Windows engine does.
     fn replay(&self, packets: &[Vec<u8>]) -> rusb::Result<()> {
-        for pkt in packets {
+        // A command may be split over continuation writes (the calibration
+        // upload, command 1110, spans ~162 bulk writes). The device answers
+        // only after the command's LAST piece, so the response wait must happen
+        // there, not after the first piece. A command is complete when the next
+        // packet starts a new command (or there is none); until then we keep
+        // writing its pieces while the async reader drains EP 0x83 (the device
+        // notifies after the first calibration piece and won't accept more
+        // until the host has read it — the reader does that continuously).
+        let mut awaiting: Option<(u32, u32, std::time::Instant, Receiver<DeviceMessage>)> = None;
+        for (i, pkt) in packets.iter().enumerate() {
             // A packet is `[channel u32][len u32][ttp message]`; the message
-            // starts at offset 8, its marker is a BE u32 there.
-            let seq = command_seq_of(pkt);
-            if let Some(seq) = seq {
+            // starts at offset 8, its marker is a BE u32 there, and the command
+            // id is the BE u32 at message offset 12 (marker, seq, status, id).
+            if let Some(seq) = command_seq_of(pkt) {
+                let cmd_id = pkt
+                    .get(20..24)
+                    .map(|b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
+                    .unwrap_or(0);
                 let (tx, rx) = sync_channel(1);
                 self.shared.waiters.lock().unwrap().insert(seq, tx);
-                self.write_raw(pkt)?;
-                if rx.recv_timeout(CMD_TIMEOUT).is_err() {
-                    self.shared.waiters.lock().unwrap().remove(&seq);
-                    // The device sometimes answers an init command with
-                    // nothing; keep going rather than abort the whole bring-up.
-                }
+                awaiting = Some((seq, cmd_id, std::time::Instant::now(), rx));
                 // Keep seq counter ahead of the init packets' own numbers.
                 self.seq.fetch_max(seq + 1, Ordering::SeqCst);
-            } else {
-                self.write_raw(pkt)?;
             }
+            self.write_raw(pkt)?;
+            let complete = packets.get(i + 1).is_none_or(|n| command_seq_of(n).is_some());
+            if complete {
+                if let Some((seq, cmd_id, t0, rx)) = awaiting.take() {
+                    match rx.recv_timeout(CMD_TIMEOUT) {
+                        Ok(bytes) => {
+                            let ms = t0.elapsed().as_millis();
+                            let err = protocol::parse_message(&bytes).map_or(0, |m| m.error);
+                            // A healthy init command answers in milliseconds
+                            // with error 0; flag anything slow or failed.
+                            if ms > 100 || err != 0 {
+                                eprintln!("[init] cmd {cmd_id} seq {seq}: {ms} ms, error {err:#x}");
+                            }
+                        }
+                        Err(_) => {
+                            self.shared.waiters.lock().unwrap().remove(&seq);
+                            eprintln!(
+                                "[init] cmd {cmd_id} seq {seq}: TIMED OUT after {} ms (no response)",
+                                t0.elapsed().as_millis()
+                            );
+                        }
+                    }
+                }
+            }
+            // Pace the writes as the Windows engine does; the device needs a
+            // moment between calibration pieces.
+            std::thread::sleep(std::time::Duration::from_millis(2));
         }
         Ok(())
     }
