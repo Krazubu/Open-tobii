@@ -304,6 +304,11 @@ fn handle_command(session: &Session, props: &Properties, subs: &Subs, req: &Mess
             let v = props.value(arg).unwrap_or(PropValue::U32(0));
             translate::notification_start_response(tx, arg, &v)
         }
+        // Property notification stop (counterpart of 5): echo the property id
+        // back with no value, as the runtime does (RESPONSE 6 err=0 -> id).
+        // A bare ack without the echoed id makes PETM retry then drop the
+        // device.
+        6 => translate::command_ok_echo(tx, command, arg),
         // Stream start (3) / stop (4): gaze (stream id 6).
         3 => {
             if arg == translate::STREAM_ADVANCED_GAZE {
