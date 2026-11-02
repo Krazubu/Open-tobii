@@ -20,8 +20,10 @@ use std::time::Duration;
 
 const EP_OUT: u8 = 0x05;
 const EP_IN: u8 = 0x83;
-const CTRL_TIMEOUT: Duration = Duration::from_millis(2000);
-const CMD_TIMEOUT: Duration = Duration::from_millis(3000);
+const CTRL_TIMEOUT: Duration = Duration::from_millis(5000);
+// Generous: USB in a VM is slow (device bring-up takes tens of seconds), and a
+// command whose response lags must not be given up on.
+const CMD_TIMEOUT: Duration = Duration::from_millis(12000);
 
 type Usb = Arc<DeviceHandle<GlobalContext>>;
 
@@ -78,14 +80,16 @@ impl Session {
         self.stream_rx.lock().unwrap().take()
     }
 
-    /// Start a device stream (command 1220), e.g. the 0x500 gaze stream.
+    /// Start a device stream (command 1220), waiting for its response so the
+    /// device actually begins streaming (a fire-and-forget send did not take).
     pub fn start_stream(&self, id: u32) -> rusb::Result<()> {
         self.command(protocol::cmd::STREAM_START, &protocol::stream_start_payload(id)).map(|_| ())
     }
 
-    /// Stop a device stream (command 1230).
+    /// Stop a device stream (command 1230), fire and forget.
     pub fn stop_stream(&self, id: u32) -> rusb::Result<()> {
-        self.command(protocol::cmd::STREAM_STOP, &protocol::stream_id_payload(id)).map(|_| ())
+        let seq = self.next_seq();
+        self.write_command(protocol::cmd::STREAM_STOP, seq, &protocol::stream_id_payload(id))
     }
 
     /// The next command sequence number.

@@ -8,7 +8,7 @@
 
 use super::transport::{Channel, Listener};
 use super::translate::{self, prop, EyeGaze, PropValue};
-use super::wire::{op, Message};
+use super::wire::{op, Message, Struct};
 use crate::ttp::calibration::{self, cmd as calcmd};
 use crate::ttp::gaze83::{self, EyeFrame};
 use crate::ttp::session::Session;
@@ -134,14 +134,24 @@ pub fn run_server(session: Arc<Session>, listener: Listener, props: Arc<Properti
     if let Some(rx) = session.take_streams() {
         let (subs, sink) = (subs.clone(), sink.clone());
         std::thread::spawn(move || {
+            let debug = std::env::var("PRP_DEBUG").is_ok();
+            let (mut total, mut gaze_frames, mut fwd) = (0u64, 0u64, 0u64);
             for msg in rx {
+                total += 1;
                 let Some(parsed) = parse_message(&msg) else { continue };
+                if debug && total <= 20 {
+                    eprintln!("fwd: stream id {:#x} ({} B)", parsed.id, msg.len());
+                }
                 if parsed.id != STREAM_ID_GAZE {
                     continue;
                 }
+                gaze_frames += 1;
                 let Some(frame) = gaze83::decode_gaze_frame(&parsed) else { continue };
                 let gaze = subs.gaze.load(Ordering::Relaxed);
                 let position = subs.position.load(Ordering::Relaxed);
+                if debug && gaze_frames % 60 == 1 {
+                    eprintln!("fwd: gaze#{gaze_frames} sub(g={gaze},p={position}) sink={} forwarded={fwd}", sink.lock().unwrap().is_some());
+                }
                 if !gaze && !position {
                     continue;
                 }
@@ -168,7 +178,9 @@ pub fn run_server(session: Arc<Session>, listener: Listener, props: Arc<Properti
                     );
                     ok &= ch.write_frame(&p).is_ok();
                 }
-                if !ok {
+                if ok {
+                    fwd += 1;
+                } else {
                     *guard = None; // sink gone; wait for the next subscription
                 }
             }
@@ -221,7 +233,13 @@ fn serve_command(mut command: Channel, session: &Session, props: &Properties, su
                 let vals = props.value(property).into_iter().collect::<Vec<_>>();
                 translate::property_enumerate_response(tx, property, &vals)
             }
-            op::COMMAND_REQUEST => handle_command(session, subs, &req),
+            // Property set: echo the property and the value back as accepted.
+            op::PROPERTY_SET_REQUEST => {
+                let property = property_of(&req);
+                let value = req.parts.get(1).cloned().unwrap_or_default();
+                Message::new(tx, op::PROPERTY_SET_RESPONSE, vec![Struct::new(vec![0, property]), value])
+            }
+            op::COMMAND_REQUEST => handle_command(session, props, subs, &req),
             other => {
                 eprintln!("prp: unhandled operation {other}");
                 continue;
@@ -261,7 +279,7 @@ fn property_of(req: &Message) -> u32 {
     req.parts.first().and_then(|s| s.word(0)).unwrap_or(0)
 }
 
-fn handle_command(session: &Session, subs: &Subs, req: &Message) -> Message {
+fn handle_command(session: &Session, props: &Properties, subs: &Subs, req: &Message) -> Message {
     let tx = req.transaction;
     let command = cmd_id(req);
     let arg = property_of_arg(req);
@@ -271,20 +289,21 @@ fn handle_command(session: &Session, subs: &Subs, req: &Message) -> Message {
         // forged); forwarding it to the device comes with the calibration
         // work.
         1 => {
-            // PETM sends a light discovery connect first (no licence, small),
-            // then a full one carrying its licence (a large variable area).
-            // The runtime answers each differently; match it by the request's
-            // size.
-            let full = req.parts.iter().map(|s| s.var.len()).sum::<usize>() > 2000;
+            // The connect request's device-info struct (parts[1]) carries the
+            // number of licences at word 1; the runtime's response grows by one
+            // result per licence, so reply with the matching captured response.
+            let licences = req.parts.get(1).and_then(|s| s.word(1)).unwrap_or(0);
             if std::env::var("PRP_DEBUG").is_ok() {
-                eprintln!("connect: {} (var {} bytes)", if full { "full" } else { "discovery" }, req.parts.iter().map(|s| s.var.len()).sum::<usize>());
+                eprintln!("connect: {licences} licence(s)");
             }
-            translate::connect_response(tx, full)
+            translate::connect_response(tx, licences)
         }
-        // Property notification start: acknowledge the subscription. Later
-        // changes (e.g. calibration id) are pushed on the subscription
-        // channel once notification forwarding lands.
-        5 => translate::command_ok_echo(tx, command, arg),
+        // Property notification start: reply with the property and its current
+        // value (the runtime does; an acknowledgement alone makes PETM abort).
+        5 => {
+            let v = props.value(arg).unwrap_or(PropValue::U32(0));
+            translate::notification_start_response(tx, arg, &v)
+        }
         // Stream start (3) / stop (4): gaze (stream id 6).
         3 => {
             if arg == translate::STREAM_ADVANCED_GAZE {
@@ -328,9 +347,11 @@ fn handle_command(session: &Session, subs: &Subs, req: &Message) -> Message {
         16 => calib(session, tx, command, calcmd::COMPUTE, &[0, 0]),
         17 => calibration_retrieve(session, tx, command),
         10 => calib(session, tx, command, calcmd::STOP, &[0, 0]),
-        // Anything else (e.g. licence retrieve): acknowledge so the client is
-        // not blocked. The bridge does not validate or forge any licence; the
-        // device streams over TTP without a licence gate.
+        // Licence key retrieve: return the licence the device holds (replayed
+        // from this device; not a fabricated verdict). PETM reads it during
+        // discovery and will not list the device without it.
+        20 => translate::license_retrieve_response(tx),
+        // Anything else: acknowledge so the client is not blocked.
         _ => translate::command_ok(tx, command),
     }
 }

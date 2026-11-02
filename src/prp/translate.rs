@@ -13,12 +13,37 @@ use super::wire::{op, Message, Struct};
 /// licence) and, once it shows the device, a full one (with its licence) — and
 /// the runtime answers each differently, so the bridge replays the matching
 /// one. Only the transaction id is swapped.
-pub fn connect_response(transaction: u32, full: bool) -> Message {
-    const DISCOVERY: &str = include_str!("../../assets/prp_connect_response_discovery.hex");
-    const FULL: &str = include_str!("../../assets/prp_connect_response.hex");
-    let hex = if full { FULL } else { DISCOVERY }.trim();
+pub fn connect_response(transaction: u32, licence_count: u32) -> Message {
+    // The runtime's response carries one validation result per licence the
+    // request sent, so it grows by 4 bytes each: PETM's discovery connect
+    // sends none, its full connect sends its own licence(s). The bridge
+    // replays the real runtime's response captured for that count — the real
+    // verdict for these licences, not a reconstructed or faked one.
+    const DISCOVERY: &str = include_str!("../../assets/prp_connect_response_discovery.hex"); // 0
+    const ONE: &str = include_str!("../../assets/prp_connect_response_1lic.hex"); // 1
+    const TWO: &str = include_str!("../../assets/prp_connect_response.hex"); // 2
+    let hex = match licence_count {
+        0 => DISCOVERY,
+        1 => ONE,
+        _ => TWO,
+    }
+    .trim();
     let bytes: Vec<u8> = (0..hex.len()).step_by(2).map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap()).collect();
     let (mut msg, _) = super::wire::parse_frame(&bytes).expect("built-in connect template parses");
+    msg.transaction = transaction;
+    msg
+}
+
+/// Response to command 20 (licence key retrieve): the licence the device
+/// holds in its own storage, which the runtime reads from the tracker and
+/// PETM reads during discovery. The bridge replays the one captured from this
+/// device — its real stored licence, not a fabricated verdict. Only the
+/// transaction id is swapped.
+pub fn license_retrieve_response(transaction: u32) -> Message {
+    const TEMPLATE: &str = include_str!("../../assets/prp_license_retrieve.hex");
+    let hex = TEMPLATE.trim();
+    let bytes: Vec<u8> = (0..hex.len()).step_by(2).map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap()).collect();
+    let (mut msg, _) = super::wire::parse_frame(&bytes).expect("built-in licence template parses");
     msg.transaction = transaction;
     msg
 }
@@ -87,9 +112,19 @@ pub fn command_ok(transaction: u32, command: u32) -> Message {
 }
 
 /// A command response that echoes a single `u32` argument (as the stream
-/// start/stop and notification-start responses do).
+/// start/stop responses do).
 pub fn command_ok_echo(transaction: u32, command: u32, arg: u32) -> Message {
     Message::new(transaction, op::COMMAND_RESPONSE, vec![Struct::new(vec![0, command]), Struct::new(vec![arg])])
+}
+
+/// Response to a property notification start (command 5): `{error, 5}` then
+/// the property id and its current value, as the runtime answers it.
+pub fn notification_start_response(transaction: u32, property: u32, value: &PropValue) -> Message {
+    Message::new(
+        transaction,
+        op::COMMAND_RESPONSE,
+        vec![Struct::new(vec![0, 5]), Struct::new(vec![property]), value.value_struct()],
+    )
 }
 
 /// One eye of an `ADVANCED_GAZE` frame, in the field order the SDK's
@@ -181,8 +216,9 @@ mod tests {
     fn connect_template_roundtrips() {
         // Rebuilding each template with its own transaction id reproduces the
         // captured frame exactly.
-        assert_eq!(write_frame(&connect_response(1, true)), hex(include_str!("../../assets/prp_connect_response.hex").trim()));
-        assert_eq!(write_frame(&connect_response(1, false)), hex(include_str!("../../assets/prp_connect_response_discovery.hex").trim()));
+        assert_eq!(write_frame(&connect_response(1, 2)), hex(include_str!("../../assets/prp_connect_response.hex").trim()));
+        assert_eq!(write_frame(&connect_response(1, 1)), hex(include_str!("../../assets/prp_connect_response_1lic.hex").trim()));
+        assert_eq!(write_frame(&connect_response(1, 0)), hex(include_str!("../../assets/prp_connect_response_discovery.hex").trim()));
     }
 
     #[test]

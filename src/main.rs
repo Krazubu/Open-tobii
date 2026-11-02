@@ -181,6 +181,12 @@ fn prp_server() {
     };
     let props = Arc::new(prp::run::Properties::read_from(&session));
     log!("device ready: '{}', {} Hz", props.device_name, props.output_frequency);
+    // Start the gaze stream now so the device streams continuously; the
+    // forwarder relays it to a client once it subscribes.
+    match session.start_stream(ttp::protocol::STREAM_ID_GAZE) {
+        Ok(()) => log!("gaze stream started"),
+        Err(e) => log!("gaze stream start failed: {e}"),
+    }
 
     let listener = match prp::transport::Listener::bind(&serial) {
         Ok(l) => l,
