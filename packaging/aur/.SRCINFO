@@ -1,6 +1,6 @@
 pkgbase = tobii-linux-bin
 	pkgdesc = Linux driver for the Tobii Eye Tracker 5: daemon, gaze and head-pose clients, and a Stream Engine 4.1 compatible libtobii.so
-	pkgver = 0.2.0
+	pkgver = 0.5.0
 	pkgrel = 1
 	url = https://github.com/Skyggedans/tobii-linux
 	install = tobii-linux-bin.install
@@ -19,7 +19,7 @@ pkgbase = tobii-linux-bin
 	conflicts = tobii-linux
 	options = !strip
 	options = !debug
-	source = https://github.com/Skyggedans/tobii-linux/releases/download/v0.2.0/tobii-linux-0.2.0-x86_64.tar.gz
-	sha256sums = 5f3e542e1247e47d5764aff17a380694aa28072bc78d60de6587620ec104913c
+	source = https://github.com/Skyggedans/tobii-linux/releases/download/v0.5.0/tobii-linux-0.5.0-x86_64.tar.gz
+	sha256sums = d50b54797a29867b3e232c534ac59e03c8c8ed54eed09643cb04dca94c9e2b25
 
 pkgname = tobii-linux-bin

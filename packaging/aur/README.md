@@ -3,8 +3,8 @@
 ## AUR — `tobii-linux-bin`
 
 `PKGBUILD`, `.SRCINFO` and the install hook here are complete and were checked
-against the published v0.2.0 tarball: the checksum matches, `package()` runs
-clean and lays out 29 files in an Arch-correct tree. They are **not published**;
+against the published v0.5.0 tarball: the checksum matches, `package()` runs
+clean and lays out 31 files in an Arch-correct tree. They are **not published**;
 doing that needs an AUR account and its SSH key:
 
 ```sh
