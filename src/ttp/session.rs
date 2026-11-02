@@ -10,8 +10,9 @@
 //! by [`super::protocol::BulkReassembler`].
 
 use super::protocol::{self, BulkReassembler, MARKER_NOTIFICATION, MARKER_RESPONSE, MARKER_STREAM};
-use rusb::{DeviceHandle, GlobalContext};
+use rusb::{DeviceHandle, GlobalContext, UsbContext};
 use std::collections::HashMap;
+use std::ffi::c_void;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 use std::sync::{Arc, Mutex};
@@ -65,7 +66,7 @@ impl Session {
             let shared = shared.clone();
             thread::Builder::new()
                 .name("ttp-reader".into())
-                .spawn(move || reader_loop(&usb, &shared))
+                .spawn(move || reader_loop(usb, shared))
                 .expect("spawn ttp reader");
         }
 
@@ -193,48 +194,104 @@ fn vendor_control_init(usb: &DeviceHandle<GlobalContext>) -> rusb::Result<()> {
     Ok(())
 }
 
-/// Read EP 0x83 forever, reassemble whole messages, and route each: command
-/// responses (0x52) to their waiter by sequence, streams (0x53) and
-/// notifications (0x4e) to the inbox.
-fn reader_loop(usb: &DeviceHandle<GlobalContext>, shared: &Shared) {
-    let debug = std::env::var("PRP_DEBUG").is_ok();
-    let mut reasm = BulkReassembler::new();
-    let mut buf = vec![0u8; 128 * 1024];
-    let mut done: Vec<DeviceMessage> = Vec::new();
-    let mut errors = 0u32;
-    loop {
-        let n = match usb.read_bulk(EP_IN, &mut buf, Duration::from_millis(1000)) {
-            Ok(n) => {
-                errors = 0;
-                n
+/// Number of EP 0x83 read transfers kept in flight, and each one's size. The
+/// device (especially over USB/IP) only streams while reads stay queued; a
+/// single synchronous read leaves gaps between calls where the pipe stalls, so
+/// a ring of outstanding async transfers keeps it drained, as Tobii's own
+/// runtime does.
+const READ_TRANSFERS: usize = 16;
+const READ_BUF_LEN: usize = 64 * 1024;
+
+/// Shared state the transfer callbacks and the event loop use. Touched only on
+/// the reader thread (libusb callbacks run inside `libusb_handle_events` on
+/// that thread), so no locking is needed within it.
+struct ReaderCtx {
+    reasm: BulkReassembler,
+    done: Vec<DeviceMessage>,
+    shared: Arc<Shared>,
+    running: bool,
+}
+
+extern "system" fn on_transfer(xfer: *mut libusb1_sys::libusb_transfer) {
+    use libusb1_sys::constants::*;
+    // Safety: `xfer` and its `user_data` live for the reader thread's lifetime.
+    let t = unsafe { &mut *xfer };
+    let ctx = unsafe { &mut *(t.user_data as *mut ReaderCtx) };
+    match t.status {
+        LIBUSB_TRANSFER_COMPLETED => {
+            let n = t.actual_length as usize;
+            let data = unsafe { std::slice::from_raw_parts(t.buffer, n) };
+            ctx.reasm.push_into(data, &mut ctx.done);
+            for msg in ctx.done.drain(..) {
+                route(&ctx.shared, msg);
             }
-            Err(rusb::Error::Timeout) => continue,
-            // The device being gone is terminal; other errors (seen in a VM's
-            // WinUSB) must not kill the reader, or the stream stops after a few
-            // frames. Log, reset the reassembler, and keep reading.
-            Err(rusb::Error::NoDevice) => {
-                if debug {
-                    eprintln!("ttp reader: device gone, stopping");
-                }
-                return;
-            }
-            Err(e) => {
-                errors += 1;
-                if debug && errors <= 5 {
-                    eprintln!("ttp reader: bulk IN error {e} (#{errors}), continuing");
-                }
-                reasm = BulkReassembler::new();
-                if errors > 200 {
-                    return;
-                }
-                continue;
-            }
-        };
-        reasm.push_into(&buf[..n], &mut done);
-        for msg in done.drain(..) {
-            route(shared, msg);
+        }
+        LIBUSB_TRANSFER_TIMED_OUT => {}
+        LIBUSB_TRANSFER_NO_DEVICE | LIBUSB_TRANSFER_CANCELLED => {
+            ctx.running = false;
+            return;
+        }
+        _ => {
+            // A transient error: resync the reassembler and keep going.
+            ctx.reasm = BulkReassembler::new();
         }
     }
+    // Resubmit this transfer so a read is always queued.
+    if unsafe { libusb1_sys::libusb_submit_transfer(xfer) } != 0 {
+        ctx.running = false;
+    }
+}
+
+/// Read EP 0x83 with a ring of asynchronous transfers, routing each completed
+/// message. Runs until the device is gone.
+fn reader_loop(usb: Usb, shared: Arc<Shared>) {
+    let ctx = Box::new(ReaderCtx {
+        reasm: BulkReassembler::new(),
+        done: Vec::new(),
+        shared,
+        running: true,
+    });
+    let ctx_ptr = Box::into_raw(ctx);
+
+    let mut buffers: Vec<Vec<u8>> = (0..READ_TRANSFERS).map(|_| vec![0u8; READ_BUF_LEN]).collect();
+    let mut transfers: Vec<*mut libusb1_sys::libusb_transfer> = Vec::with_capacity(READ_TRANSFERS);
+    for buf in buffers.iter_mut() {
+        let xfer = unsafe { libusb1_sys::libusb_alloc_transfer(0) };
+        if xfer.is_null() {
+            break;
+        }
+        unsafe {
+            (*xfer).dev_handle = usb.as_raw();
+            (*xfer).endpoint = EP_IN;
+            (*xfer).transfer_type = libusb1_sys::constants::LIBUSB_TRANSFER_TYPE_BULK;
+            (*xfer).timeout = 0; // no timeout: a queued read waits for data
+            (*xfer).buffer = buf.as_mut_ptr();
+            (*xfer).length = READ_BUF_LEN as i32;
+            (*xfer).callback = on_transfer;
+            (*xfer).user_data = ctx_ptr as *mut c_void;
+            if libusb1_sys::libusb_submit_transfer(xfer) == 0 {
+                transfers.push(xfer);
+            } else {
+                libusb1_sys::libusb_free_transfer(xfer);
+            }
+        }
+    }
+
+    let context = usb.context().as_raw();
+    while unsafe { (*ctx_ptr).running } {
+        let tv = libc::timeval { tv_sec: 1, tv_usec: 0 };
+        unsafe { libusb1_sys::libusb_handle_events_timeout_completed(context, &tv, std::ptr::null_mut()) };
+    }
+
+    // Best-effort cleanup.
+    for xfer in transfers {
+        unsafe {
+            libusb1_sys::libusb_cancel_transfer(xfer);
+            libusb1_sys::libusb_free_transfer(xfer);
+        }
+    }
+    drop(buffers);
+    drop(unsafe { Box::from_raw(ctx_ptr) });
 }
 
 fn route(shared: &Shared, msg: DeviceMessage) {

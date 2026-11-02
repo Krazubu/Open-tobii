@@ -14,6 +14,8 @@ libusb1-sys = "=0.7.0"
 # Used by the ported TTP modules (src/ttp, from tobii-linux).
 anyhow = "1"
 tracing = "0.1"
+# For the asynchronous EP 0x83 reader (libusb async transfers + timeval).
+libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [
