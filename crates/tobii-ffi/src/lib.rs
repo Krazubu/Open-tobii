@@ -77,10 +77,10 @@
 //!   two renames are internal stream 5's subscribe and unsubscribe, above),
 //!   seventeen give real answers. Ten come from the daemon: the tracker's fault
 //!   and warning lists and their streams (see `faults`), the presence stream
-//!   and the responsive gaze point, which by a known defect carries the
-//!   filtered point, where the DLL, driving an ET5 itself, most likely refuses
-//!   the subscribe (see `streams`). Seven are answered locally: the output
-//!   frequency as a stream, whose receiver is called once, from inside the
+//!   and the responsive gaze point, which carries the tracker's own unfiltered
+//!   point (key 0x20), where the DLL, driving an ET5 itself, most likely
+//!   refuses the subscribe (see `streams`). Seven are answered locally: the
+//!   output frequency as a stream, whose receiver is called once, from inside
 //!   subscribe, with the 33 Hz the ET5 never changes (see `config`), whether
 //!   the extended lens configuration can be written, never, as for the basic
 //!   one (see `wearable`), and the four signing calls, which need no device

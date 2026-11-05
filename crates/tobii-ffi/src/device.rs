@@ -1161,9 +1161,10 @@ pub(crate) struct Callbacks {
     /// The point the foveated gaze point holds, kept while nothing is
     /// subscribed to it, as the DLL keeps its own.
     pub(crate) foveated_point: FoveatedPoint,
-    /// 4.25's `tobii_stream_t` 12, fed from raw gaze's combined point, which
-    /// is the tracker's filtered point (key 0x1c), not the responsive one
-    /// (key 0x20) the stream is for: a known defect (see `streams`).
+    /// 4.25's `tobii_stream_t` 12: the tracker's "Remote Gaze Point
+    /// Responsive Combined", key 0x20 of each gaze frame with validity 0x1f,
+    /// which tobiid carries in the tail of its raw gaze record with the
+    /// frame's host time (see `streams`).
     pub(crate) responsive_gaze: Slot<GazePointFn>,
     pub(crate) image: Slot<ImageFn>,
     pub(crate) notifications: Slot<NotificationsFn>,
@@ -2370,21 +2371,21 @@ impl Device {
                     // outlives the call.
                     call(|| unsafe { f(&raw const p, ud) });
                 }
-                // The responsive gaze point rides on the same record: its
-                // combined point, which tobiid fills from the frame's
-                // filtered point (key 0x1c, validity 0x1b), not from the
-                // responsive one (key 0x20, validity 0x1f) the stream is
-                // for, a known defect (see `streams`). Its timestamp has to
-                // be on the host clock, as every stream's is, so a record
-                // from a tobiid that sends no host time feeds nothing rather
-                // than a device-clock time.
-                if let (Some((f, ud)), Some(timestamp_us)) =
-                    (cb.responsive_gaze, record.timestamp_system_us)
-                {
+                // The responsive gaze point rides on the same record, from
+                // the tail tobiid adds to it: the tracker's own combined
+                // point (key 0x20, validity 0x1f), which the Stream Engine's
+                // record does not keep. A record from a tobiid from before
+                // the tail feeds nothing, as one without a host time does:
+                // the callback's stamp has to be on the host clock.
+                if let (Some((f, ud)), Some(timestamp_us), Some(position_xy)) = (
+                    cb.responsive_gaze,
+                    record.timestamp_system_us,
+                    record.responsive_gaze_point_on_display,
+                ) {
                     let p = GazePoint {
                         timestamp_us,
-                        validity: validity(record.combined_gaze_validity != 0),
-                        position_xy: record.combined_gaze_point_on_display,
+                        validity: validity(record.responsive_gaze_validity == 1),
+                        position_xy,
                     };
                     // SAFETY: registered through
                     // `tobii_responsive_gaze_point_subscribe`; `p` outlives
@@ -4029,11 +4030,13 @@ pub(crate) mod tests {
         assert_eq!(warnings, ["WARN_B"]);
     }
 
-    /// The responsive gaze point rides on the raw-gaze record: the combined
-    /// point and its own validity, stamped on the host clock. A record
-    /// without a host time feeds nothing rather than a device-clock stamp.
+    /// The responsive gaze point is the tracker's own, key `0x20` with
+    /// validity `0x1f`, from the tail tobiid adds to the raw-gaze record: not
+    /// the filtered combined point the record carries. Only validity 1 is
+    /// valid, as for the gaze point, and a record from a tobiid from before
+    /// the tail, or one without a host time, feeds nothing.
     #[test]
-    fn responsive_gaze_point_comes_from_the_raw_record() {
+    fn responsive_gaze_point_comes_from_its_own_tail() {
         unsafe extern "C" fn keep_point(p: *const GazePoint, ud: *mut c_void) {
             // SAFETY: the delivery hands a live point and the test's own
             // vector as `ud`.
@@ -4052,26 +4055,43 @@ pub(crate) mod tests {
         let stamped = tobii_ipc::GazeRaw {
             timestamp_tracker_us: 5,
             timestamp_system_us: Some(77),
-            combined_gaze_point_on_display: [0.25, 0.75],
+            // The filtered point differs, so taking it would show.
+            combined_gaze_point_on_display: [0.5, 0.5],
             combined_gaze_validity: 1,
+            responsive_gaze_point_on_display: Some([0.25, 0.75]),
+            responsive_gaze_validity: 1,
             ..Default::default()
         };
-        let unstamped = tobii_ipc::GazeRaw {
-            timestamp_system_us: None,
+        let other_word = tobii_ipc::GazeRaw {
+            responsive_gaze_validity: 2,
             ..stamped
         };
-        for raw in [stamped, unstamped] {
+        let untailed = tobii_ipc::GazeRaw {
+            responsive_gaze_point_on_display: None,
+            responsive_gaze_validity: 0,
+            ..stamped
+        };
+        for raw in [stamped, other_word, untailed] {
             let body = tobii_ipc::encode_gaze_raw(&raw);
             d.queue(decode_server(&body).expect("decodes"));
         }
+        // A tail without a host time, which the encoder cannot write, feeds
+        // nothing either.
+        d.queue(ServerMsg::GazeRaw(Box::new(tobii_ipc::GazeRaw {
+            timestamp_system_us: None,
+            ..stamped
+        })));
         assert_eq!(d.process(), TOBII_ERROR_NO_ERROR);
         drop(d);
-        let [point] = &seen[..] else {
+        let [valid, invalid] = &seen[..] else {
             panic!("{} points", seen.len());
         };
-        assert_eq!(point.timestamp_us, 77, "the host clock, not the device's");
-        assert_eq!(point.validity, TOBII_VALIDITY_VALID);
-        assert_eq!(point.position_xy, [0.25, 0.75]);
+        assert_eq!(valid.timestamp_us, 77, "the host clock, not the device's");
+        assert_eq!(valid.validity, TOBII_VALIDITY_VALID);
+        assert_eq!(valid.position_xy, [0.25, 0.75]);
+        assert_eq!(invalid.timestamp_us, 77);
+        assert_eq!(invalid.validity, TOBII_VALIDITY_INVALID, "only 1 is valid");
+        assert_eq!(invalid.position_xy, [0.25, 0.75]);
     }
 
     /// The output-frequency stream: the receiver is called once, from inside

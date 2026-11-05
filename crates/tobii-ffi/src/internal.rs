@@ -2804,6 +2804,9 @@ mod tests {
             left_eyeball_center_mm: Some([-30.0, 10.5, 620.25]),
             right_eyeball_center_mm: None,
             timestamp_system_us: Some(1_208_455_092_731),
+            // The daemon's tail, not part of the C record.
+            responsive_gaze_point_on_display: Some([0.125, 0.375]),
+            responsive_gaze_validity: 1,
         };
         let frame = encode_gaze_raw(&sample);
         // Sent ahead of the ack of raw gaze alone, so that it waits for

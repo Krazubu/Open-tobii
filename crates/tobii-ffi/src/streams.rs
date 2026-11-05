@@ -133,31 +133,34 @@ stream_pair! {
     /// (0x18007c365).
     tobii_presence_subscribe / tobii_presence_unsubscribe: presence_sample, PresenceSampleFn;
     /// The responsive combined gaze point (`tobii_stream_t` 12, the stream
-    /// 4.25 adds), meant to carry the tracker's own "Remote Gaze Point
-    /// Responsive Combined", stream 0x83 key `0x20` with validity `0x1f`:
-    /// the unfiltered point the ET5 sends beside the filtered one
-    /// `tobii_gaze_point_subscribe` delivers. What 4.25 hands out for it is
-    /// not known. Its stream check answers for 12 as for the gaze point
-    /// (0x1800915c0), but the subscribe maps 12 to PRP stream 0x1d,
+    /// 4.25 adds): the tracker's own "Remote Gaze Point Responsive
+    /// Combined", stream 0x83 key `0x20` with validity `0x1f`, the
+    /// unfiltered point the ET5 sends beside the filtered one
+    /// `tobii_gaze_point_subscribe` delivers (see
+    /// `crates/tobii-proto/src/gaze83.rs`). tobiid reads it from every gaze
+    /// frame and puts it, with the frame's host time, in the tail of its
+    /// raw-gaze record (see
+    /// [`tobii_ipc::GazeRaw::responsive_gaze_point_on_display`]); a tobiid
+    /// from before the tail feeds nothing. Its timestamp is that host time,
+    /// its position is in normalised display coordinates as the gaze point's
+    /// is, and it is valid only while the tracker's validity word is 1, as
+    /// the gaze point is.
+    ///
+    /// For a tracker the DLL drives itself it most likely refuses the
+    /// subscribe: its stream check answers for 12 as for the gaze point
+    /// (0x1800915c0), but its subscribe maps 12 to PRP stream 0x1d,
     /// `RESPONSIVE_GAZE_POINT` (0x18008f005), and for a tracker the DLL
     /// drives itself its legacy-TTP module answers that stream's subscribe
     /// with the stub 0x1800a1cb0 (`mov $0x3,%eax; ret`,
     /// `PLATMOD_ERROR_NOT_SUPPORTED`; case at 0x180109300), as it does for
-    /// the device log and the 3-D facial landmarks. So for an ET5 the DLL
-    /// most likely refuses the subscribe; that it hands out key `0x20` behind
-    /// the Tobii service is inferred from the names alone.
+    /// the device log and the 3-D facial landmarks. That it hands out key
+    /// `0x20` behind the Tobii service is inferred from the names alone;
+    /// here the key is the tracker's own, so the stream hands out what it is
+    /// for. The user position guide is handed out on the same policy, though
+    /// the DLL's legacy-TTP path never reports it.
     ///
-    /// What this hands out is not that point but, by mistake, the filtered
-    /// one: a known defect, not a choice. It is the combined point of the
-    /// daemon's `GAZE_RAW` record, which tobiid fills, as the Stream Engine
-    /// fills its own record, from key `0x1c` with validity `0x1b`
-    /// (`crates/tobiid/src/frames.rs`). So it delivers the point and host
-    /// time the gaze point does, but counts any validity word other than 0
-    /// as valid, where the gaze point takes only 1, and a record from a
-    /// tobiid that sends no host time feeds it nothing. Handing out key
-    /// `0x20` needs tobiid to send it: no daemon message carries it. It rides
-    /// on the same daemon stream as raw gaze, so subscribing to it alone
-    /// starts that stream.
+    /// It rides on the same daemon stream as raw gaze, so subscribing to it
+    /// alone starts that stream.
     tobii_responsive_gaze_point_subscribe / tobii_responsive_gaze_point_unsubscribe: responsive_gaze, GazePointFn;
     /// The user position guide: the tracker's own User 3D Position Guide,
     /// each eye's place in the camera image and a depth that rises with its
