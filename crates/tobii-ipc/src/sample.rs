@@ -137,6 +137,10 @@ pub struct GazeRawEye {
 /// device sent them, filtered by nothing. A key the frame lacks is `None`
 /// where the record flags it, and 0 elsewhere; `Some` says only that the
 /// frame had the key, not that its value is usable.
+///
+/// The host time and the responsive gaze point after it are not part of the
+/// record: they are the daemon's tail, for what libtobii makes from the
+/// record on the host clock and for the responsive gaze point stream.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct GazeRaw {
     /// When the frame was taken, on the **device** clock, microseconds, as
@@ -175,9 +179,24 @@ pub struct GazeRaw {
     /// ([`crate::host_clock_us`], `tobii_system_clock`'s), as the daemon maps
     /// the stamps of its other streams: not part of the Stream Engine's
     /// record, but the stamp it gives what it makes from it on the host
-    /// clock (the foveated rendering gaze point). Sent last, as an optional
-    /// tail: `None` from a daemon from before it.
+    /// clock (the foveated rendering gaze point). Sent as an optional tail:
+    /// `None` from a daemon from before it.
     pub timestamp_system_us: Option<i64>,
+    /// The tracker's "Remote Gaze Point Responsive Combined" as tobiid read
+    /// it (key `0x20`), in normalised display coordinates, unclamped: the
+    /// unfiltered combined gaze point the ET5 sends beside the filtered one
+    /// of [`Self::combined_gaze_point_on_display`]. Not part of the Stream
+    /// Engine's record: libtobii hands it out for its responsive gaze point
+    /// (`tobii_stream_t` 12). Written after [`Self::timestamp_system_us`],
+    /// and only with it — a body without the host time has no room for the
+    /// tail — so a daemon sends both together, and `None` comes from a daemon
+    /// from before the tail.
+    pub responsive_gaze_point_on_display: Option<[f32; 2]>,
+    /// Validity of [`Self::responsive_gaze_point_on_display`] (key `0x1f`)
+    /// as tobiid read it: the tracker's word reduced to 1 when it is 1 and 0
+    /// otherwise, as [`crate::GazeRaw`] carries it in `Valued::valid`.
+    /// Written with the point; 0 when the point is absent.
+    pub responsive_gaze_validity: u32,
 }
 
 /// The Stream Engine's head pose: `tobii_head_pose_t`, validity included.
@@ -510,11 +529,15 @@ fn write_gaze_raw_eye(w: &mut Writer, eye: &GazeRawEye) {
 /// then each field the frame may lack as `u8 present` and its value, zero
 /// when absent: five `u32`s, then the two eyeball centres, `3 x f32` each.
 /// 175 bytes after the tag; then, when there is one, the `i64` host time
-/// ([`GazeRaw::timestamp_system_us`]), a tail a decoder from before it
-/// ignores, as this one ignores whatever a later daemon appends after it.
+/// ([`GazeRaw::timestamp_system_us`]); then, when the daemon has it, the
+/// responsive gaze point `2 x f32` with its `u32` validity
+/// ([`GazeRaw::responsive_gaze_point_on_display`]). Both are a tail a
+/// decoder from before it ignores, as this one ignores whatever a later
+/// daemon appends after it. Without the host time there is no room for the
+/// point, and the encoder writes neither: the two go together.
 #[must_use]
 pub fn encode_gaze_raw(raw: &GazeRaw) -> Vec<u8> {
-    let mut w = Writer::with_tag(TAG_GAZE_RAW, 8 + 2 * 52 + 12 + 5 * 5 + 2 * 13 + 8);
+    let mut w = Writer::with_tag(TAG_GAZE_RAW, 8 + 2 * 52 + 12 + 5 * 5 + 2 * 13 + 8 + 12);
     w.i64(raw.timestamp_tracker_us);
     write_gaze_raw_eye(&mut w, &raw.left);
     write_gaze_raw_eye(&mut w, &raw.right);
@@ -534,6 +557,9 @@ pub fn encode_gaze_raw(raw: &GazeRaw) -> Vec<u8> {
     }
     if let Some(host_us) = raw.timestamp_system_us {
         w.i64(host_us);
+        if let Some(point) = raw.responsive_gaze_point_on_display {
+            w.f32s(&point).u32(raw.responsive_gaze_validity);
+        }
     }
     w.finish()
 }
@@ -697,21 +723,43 @@ fn read_present_point(r: &mut Reader<'_>) -> Option<Option<[f32; 3]>> {
 }
 
 fn read_gaze_raw(r: &mut Reader<'_>) -> Option<GazeRaw> {
+    let timestamp_tracker_us = r.i64()?;
+    let left = read_gaze_raw_eye(r)?;
+    let right = read_gaze_raw_eye(r)?;
+    let combined_gaze_point_on_display = r.f32s()?;
+    let combined_gaze_validity = r.u32()?;
+    let key_0e = read_present_u32(r)?;
+    let key_11 = read_present_u32(r)?;
+    let frame_counter = read_present_u32(r)?;
+    let left_origin_flag = read_present_u32(r)?;
+    let right_origin_flag = read_present_u32(r)?;
+    let left_eyeball_center_mm = read_present_point(r)?;
+    let right_eyeball_center_mm = read_present_point(r)?;
+    // Optional tails: the host time, then the responsive gaze point and its
+    // validity, which are there only together. A daemon from before either
+    // sends neither.
+    let timestamp_system_us = r.i64();
+    let responsive = r.f32s().and_then(|point| Some((point, r.u32()?)));
+    let (responsive_gaze_point_on_display, responsive_gaze_validity) = match responsive {
+        Some((point, validity)) => (Some(point), validity),
+        None => (None, 0),
+    };
     Some(GazeRaw {
-        timestamp_tracker_us: r.i64()?,
-        left: read_gaze_raw_eye(r)?,
-        right: read_gaze_raw_eye(r)?,
-        combined_gaze_point_on_display: r.f32s()?,
-        combined_gaze_validity: r.u32()?,
-        key_0e: read_present_u32(r)?,
-        key_11: read_present_u32(r)?,
-        frame_counter: read_present_u32(r)?,
-        left_origin_flag: read_present_u32(r)?,
-        right_origin_flag: read_present_u32(r)?,
-        left_eyeball_center_mm: read_present_point(r)?,
-        right_eyeball_center_mm: read_present_point(r)?,
-        // An optional tail: a daemon from before it sends none.
-        timestamp_system_us: r.i64(),
+        timestamp_tracker_us,
+        left,
+        right,
+        combined_gaze_point_on_display,
+        combined_gaze_validity,
+        key_0e,
+        key_11,
+        frame_counter,
+        left_origin_flag,
+        right_origin_flag,
+        left_eyeball_center_mm,
+        right_eyeball_center_mm,
+        timestamp_system_us,
+        responsive_gaze_point_on_display,
+        responsive_gaze_validity,
     })
 }
 

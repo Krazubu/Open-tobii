@@ -197,7 +197,8 @@ pub const TAG_IMAGE: u8 = 0x26;
 /// Daemon -> client: `u8 type`, `u8 value_type`, value (a [`Notification`]).
 pub const TAG_NOTIFICATION: u8 = 0x27;
 /// Daemon -> client: a [`GazeRaw`] sample, stamped with the device clock
-/// rather than the host's.
+/// rather than the host's; its optional tail carries the host time and, with
+/// it, the responsive gaze point.
 pub const TAG_GAZE_RAW: u8 = 0x28;
 /// Daemon -> client: a [`HeadPose`] sample: `i64 ts_us`, `u8 flags` (bit 0
 /// the position valid, bits 1..3 the rotation's x, y, z), `3 x f32`
@@ -786,6 +787,8 @@ mod tests {
             left_eyeball_center_mm: Some([-30.5, 29.75, 610.25]),
             right_eyeball_center_mm: Some([31.5, 30.25, 612.0]),
             timestamp_system_us: Some(1_208_455_092_731),
+            responsive_gaze_point_on_display: Some([0.5626, 0.1012]),
+            responsive_gaze_validity: 1,
         }
     }
 
@@ -819,6 +822,13 @@ mod tests {
             bits.push(u32::from(point.is_some()));
             bits.extend(point.unwrap_or_default().map(f32::to_bits));
         }
+        bits.push(u32::from(raw.responsive_gaze_point_on_display.is_some()));
+        bits.extend(
+            raw.responsive_gaze_point_on_display
+                .unwrap_or_default()
+                .map(f32::to_bits),
+        );
+        bits.push(raw.responsive_gaze_validity);
         (raw.timestamp_tracker_us, bits)
     }
 
@@ -829,9 +839,11 @@ mod tests {
         }
     }
 
-    /// A raw gaze sample round-trips in 176 bytes, the tag included, and 184
-    /// with its host time, with each field the frame may lack told apart from
-    /// one sent as 0.
+    /// A raw gaze sample round-trips in 176 bytes, the tag included, 184
+    /// with its host time and 12 more with the responsive point, with each
+    /// field the frame may lack told apart from one sent as 0. The
+    /// responsive point goes with the host time: without one, the encoder
+    /// writes neither.
     #[test]
     fn gaze_raw_round_trips() {
         let sent = gaze_raw();
@@ -858,12 +870,18 @@ mod tests {
 
         let untimed = GazeRaw {
             timestamp_system_us: None,
+            responsive_gaze_point_on_display: None,
+            responsive_gaze_validity: 0,
+            ..sent
+        };
+        let orphaned = GazeRaw {
+            timestamp_system_us: None,
             ..sent
         };
         for raw in [sent, lacking, zero, untimed, GazeRaw::default()] {
             let body = encode_gaze_raw(&raw);
             let len = if raw.timestamp_system_us.is_some() {
-                184
+                184 + 12 * usize::from(raw.responsive_gaze_point_on_display.is_some())
             } else {
                 176
             };
@@ -874,6 +892,9 @@ mod tests {
                 Some(ServerMsg::GazeRaw(Box::new(raw)))
             );
         }
+        let body = encode_gaze_raw(&orphaned);
+        assert_eq!(body.len(), 176, "no host time, no room for the point");
+        assert_eq!(decode_gaze_raw(&body), Some(untimed));
         assert_ne!(encode_gaze_raw(&lacking), encode_gaze_raw(&zero));
     }
 
@@ -928,7 +949,10 @@ mod tests {
         assert_eq!(at(&lacking, 163, 176), Some(vec![0; 13]));
         let host_us = raw.timestamp_system_us.expect("host time");
         assert_eq!(at(&body, 176, 184), Some(host_us.to_le_bytes().to_vec()));
-        assert_eq!(body.len(), 184, "the host time last");
+        let responsive = raw.responsive_gaze_point_on_display.expect("point");
+        assert_eq!(at(&body, 184, 192), floats(&responsive));
+        assert_eq!(at(&body, 192, 196), word(raw.responsive_gaze_validity));
+        assert_eq!(body.len(), 196, "the responsive point last");
     }
 
     /// The record filters nothing, so neither does the frame: `NaN` (with a
@@ -969,6 +993,8 @@ mod tests {
             key_0e: Some(u32::MAX),
             left_eyeball_center_mm: Some([f32::NAN, -1.0, f32::from_bits(0x7fc0_1234)]),
             right_eyeball_center_mm: Some([1.0, -0.0, f32::NEG_INFINITY]),
+            responsive_gaze_point_on_display: Some([f32::NAN, -0.0]),
+            responsive_gaze_validity: u32::MAX,
             ..gaze_raw()
         };
 
@@ -986,9 +1012,10 @@ mod tests {
 
     /// A body cut before its host time is dropped. Without the host time, as
     /// from a daemon from before it, it decodes with none (and so it does
-    /// with the host time cut short, which no daemon sends); and one with
-    /// more after it decodes, which leaves room for a tail a later daemon
-    /// may add.
+    /// with the host time cut short, which no daemon sends); a body cut
+    /// within the responsive tail decodes without the point, as one from a
+    /// daemon from before the tail does; and one with more after it decodes,
+    /// which leaves room for a tail a later daemon may add.
     #[test]
     fn a_short_gaze_raw_body_is_rejected_and_a_tail_is_ignored() {
         let raw = gaze_raw();
@@ -999,10 +1026,24 @@ mod tests {
         }
         let untimed = GazeRaw {
             timestamp_system_us: None,
+            responsive_gaze_point_on_display: None,
+            responsive_gaze_validity: 0,
             ..raw
         };
-        for len in 176..body.len() {
+        for len in 176..184 {
             assert_eq!(decode_gaze_raw(&body[..len]), Some(untimed), "cut at {len}");
+        }
+        let untailed = GazeRaw {
+            responsive_gaze_point_on_display: None,
+            responsive_gaze_validity: 0,
+            ..raw
+        };
+        for len in 184..body.len() {
+            assert_eq!(
+                decode_gaze_raw(&body[..len]),
+                Some(untailed),
+                "cut at {len}"
+            );
         }
         let mut longer = body.clone();
         longer.extend_from_slice(&[0xa5; 9]);
