@@ -152,21 +152,23 @@ mod tests {
     }
 
     /// The blob the init replay uploads round-trips through the payload
-    /// framing, and carries the calibration id the device reports.
+    /// framing, and is the tracker's power-up default (id 0).
     #[test]
     fn write_payload_round_trips_the_embedded_blob() {
         let packets = parse_init_packets(crate::INIT_PACKETS).expect("init file");
-        let message: Vec<u8> = packets[38..200]
+        let upload = packets
             .iter()
-            .flat_map(|p| p.data[8..].iter().copied())
-            .collect();
-        let prefixed = [&[0u8; 8][..], &message].concat();
-        let payload = parse_message(&prefixed).expect("header").payload;
+            .find_map(|p| {
+                let message = parse_message(&p.data)?;
+                (message.id == cmd::WRITE).then_some(message)
+            })
+            .expect("the init's 1110 write");
+        let payload = upload.payload;
 
         let blob = blob_from_payload(payload).expect("blob");
 
-        assert_eq!(blob.len(), 659_056);
-        assert_eq!(&blob[20..24], &1_904_654_973u32.to_le_bytes());
+        assert_eq!(blob.len(), 1469);
+        assert_eq!(&blob[20..24], &0u32.to_le_bytes());
         assert_eq!(write_payload(blob), payload);
     }
 }

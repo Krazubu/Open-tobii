@@ -6282,12 +6282,18 @@ mod tests {
         for (i, step) in steps[..38].iter().enumerate() {
             assert_eq!(*step, AfterWrite::Await(u32::try_from(i + 1).expect("seq")));
         }
-        // The calibration upload (seq 39) spans 162 writes. The device stops
-        // taking them while its notification is unread, so every write but
-        // the last drains; the response is awaited after the last.
-        assert!(steps[38..199].iter().all(|s| *s == AfterWrite::Drain));
-        assert_eq!(steps[199], AfterWrite::Await(39));
-        assert_eq!(steps[200..], [AfterWrite::Await(40), AfterWrite::Await(41)]);
+        // The built-in calibration upload (seq 0x27) is one write, and the
+        // device's notification only makes the host drain between the pieces
+        // of a long one; the 1490 and the two stream starts follow.
+        assert_eq!(
+            steps[38..],
+            [
+                AfterWrite::Await(0x27),
+                AfterWrite::Await(0x28),
+                AfterWrite::Await(0x29),
+                AfterWrite::Await(0x2a)
+            ]
+        );
     }
 
     /// What a fake EP 0x05 saw, in order.

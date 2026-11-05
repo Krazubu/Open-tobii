@@ -1,11 +1,12 @@
 //! The init replay, adapted to this user: their saved calibration instead of
-//! the one embedded in the capture (the author's), and their display area
-//! instead of the capture's (633.6 x 334.3 mm).
+//! the tracker's power-up default the replay carries (id 0), and their
+//! display area instead of the capture's (633.6 x 334.3 mm).
 //!
-//! Both are single commands inside the replay (1110 write-calibration, split
-//! over 162 bulk writes, and 1440 set-display-area); they are rebuilt with the
-//! same sequence numbers, so the rest of the replay and the command numbering
-//! after it are unchanged.
+//! Both are single commands inside the replay (1110 write-calibration and
+//! 1440 set-display-area); they are rebuilt with the same sequence numbers,
+//! so the rest of the replay and the command numbering after it are
+//! unchanged. The built-in blob fits in one bulk write; a saved calibration
+//! of the user's is chunked.
 
 use std::ops::Range;
 use std::path::PathBuf;
@@ -22,13 +23,16 @@ use tracing::{info, warn};
 
 use crate::device::EP_OUT;
 
-/// The Windows engine's init sequence, captured once and replayed verbatim.
+/// The Windows engine's init sequence as captured, with the tracker's own
+/// power-up default in place of the calibration the capture uploaded and a
+/// calibration-status ask (1490) after it; the two stream starts that
+/// followed moved to the sequence numbers freed by the shorter upload.
 const EMBEDDED_INIT: &str = include_str!("../init_packets_ep.txt");
 
 /// Where the calibration in use came from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Source {
-    /// Built into the init replay (the capture author's).
+    /// Built into the init replay: the tracker's power-up default, id 0.
     Embedded,
     /// The user's saved calibration.
     File(PathBuf),
@@ -196,8 +200,8 @@ pub fn init_packets(display_area: Option<&DisplayArea>) -> Result<Vec<InitPacket
         }
         Source::Embedded => warn!(
             id = tobii_calib::blob::calibration_id(&blob),
-            "calibration: the built-in one, made for someone else's eyes: gaze on the screen \
-             is off until tobii-calibrate makes yours"
+            "calibration: the built-in one, the tracker's power-up default (id 0): coarse, so \
+             gaze on the screen is off until tobii-calibrate makes yours"
         ),
     }
     if let Some(area) = display_area {
@@ -215,10 +219,8 @@ mod tests {
     fn substituting_the_embedded_blob_changes_nothing() {
         let packets = embedded_packets().expect("embedded");
         let blob = embedded_blob().expect("blob");
-        assert_eq!(
-            tobii_calib::blob::calibration_id(&blob),
-            Some(1_904_654_973)
-        );
+        // The replay uploads the tracker's own power-up default, id 0.
+        assert_eq!(tobii_calib::blob::calibration_id(&blob), Some(0));
 
         let substituted = substitute_calibration(&packets, &blob).expect("substitute");
 
@@ -232,10 +234,28 @@ mod tests {
 
         let substituted = substitute_calibration(&packets, &blob).expect("substitute");
 
-        assert_eq!(substituted.len(), packets.len() - 161);
+        // The replay's upload is one packet already; it is swapped for one.
+        assert_eq!(substituted.len(), packets.len());
         let (run, seq) = command_run(&substituted, calib_cmd::cmd::WRITE).expect("run");
         assert_eq!((run.len(), seq), (1, 0x27));
         assert_eq!(next_command_seq(&substituted), next_command_seq(&packets));
+    }
+
+    /// The replay ends with the two stream starts, and the command numbering
+    /// after it follows them.
+    #[test]
+    fn the_replay_ends_with_the_stream_starts() {
+        let packets = embedded_packets().expect("embedded");
+
+        assert_eq!(
+            command_of(&packets[packets.len() - 2].data),
+            Some((1220, 0x29))
+        );
+        assert_eq!(
+            command_of(&packets[packets.len() - 1].data),
+            Some((1220, 0x2a))
+        );
+        assert_eq!(next_command_seq(&packets), 0x2b);
     }
 
     /// A display area a user might set: a 597 x 336 mm monitor.

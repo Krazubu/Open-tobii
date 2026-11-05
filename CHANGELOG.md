@@ -12,6 +12,26 @@ its reason, or marked as a mistake where it is one.
 
 ## Unreleased
 
+### Changed
+
+- **The built-in calibration is the tracker's own power-up default, not the
+  capture author's.** A tracker with no saved calibration of the user's now
+  starts on id 0, the coarse default it powers up with, which
+  `init_packets_ep.txt` uploads in one bulk write instead of the captured
+  162-write upload of someone else's 660 KB blob. The replay also asks the
+  calibration status (1490) after the upload, so `device ready` and
+  `tobii-calibrate --status` report id 0 rather than the old blob's. The
+  blob is 1469 bytes with no point records and no serial number in it, and
+  a run on the hardware on 2026-11-05 confirmed the tracker takes it. Gaze
+  on the screen is coarser until the user calibrates: against a real
+  calibration measured then, mean error 18.9 mm / 1.8° at id 0 and 7.1 mm /
+  0.7° with one. Head pose and face presence are unaffected (100% valid at
+  id 0 in every phase of that run), but eye-closure detection degrades: a
+  closed eye still reports a tracked pupil in 64-71% of frames, where it
+  drops to 31-36% under a real calibration, so `tobii-gaze-keys`' winks and
+  `tobii-hub`'s per-eye display need a calibration to work well. The
+  author's blob no longer ships, and the replay carries no one's.
+
 ### Fixed
 
 - **`tobii_responsive_gaze_point_subscribe` hands out the tracker's

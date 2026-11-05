@@ -52,19 +52,19 @@ and I want to hear about it.
   the owner's own device and the decision to leave it is theirs. Current code,
   logs and packages are checked for it on every release
   (`packaging/scan-serial.py`).
-- The calibration a tracker runs on until its user saves one is **the
+- The calibration a tracker runs on until its user saves one **used to be the
   author's own**: the Windows capture's (id 1904654973), which `tobiid`
-  uploads at every start from `crates/tobii-usb/init_packets_ep.txt`. Its 14
-  point records, where the author's eyes were measured looking at each
-  target, are in the clear; the rest, about 658 KB, is encrypted under a key
-  every Eye Tracker 5 appears to share, so anyone with one can probably read
-  it. It is in every release so far, in the tree, and in the history, also
-  as a decoded copy of its points (`tools/calibration.json`, removed after
-  0.4.1) and inside the USB capture that holds the serial. Any client can
-  read it back from a tracker running on it (`tobii_calibration_retrieve`).
-  It is the owner's own data and the decision to ship it is theirs;
-  replacing it with the tracker's own default calibration waits on a test on
-  the hardware.
+  uploaded at every start from `crates/tobii-usb/init_packets_ep.txt` through
+  0.5.0. Its 14 point records, where the author's eyes were measured looking
+  at each target, are in the clear; the rest, about 658 KB, is encrypted
+  under a key every Eye Tracker 5 appears to share, so anyone with one can
+  probably read it. It is in the history of every release so far, also as a
+  decoded copy of its points (`tools/calibration.json`, removed after 0.4.1)
+  and inside the USB capture that holds the serial. The built-in calibration
+  is now the tracker's own power-up default instead (id 0, 1469 bytes, no
+  point records, no serial), which a run on the hardware on 2026-11-05
+  verified the device takes; the change is unreleased, and the tags before
+  it still carry the author's blob.
 - `libtobii.so` reproduces the Stream Engine's API faithfully, including that
   it **checks no licence**. A program can call entry points the Windows SDK
   reserves for a higher feature group. That is deliberate and documented in

@@ -38,8 +38,9 @@ const SAVED_TOGETHER: Duration = Duration::from_secs(60);
 pub(crate) enum Calibration {
     /// `TOBII_CALIBRATION=embedded`: the built-in one, by choice.
     BuiltInChosen,
-    /// None of the user's: the built-in one, the author's. `path` is where
-    /// theirs would be saved (none without a home directory).
+    /// None of the user's: the tracker's power-up default (id 0), coarse.
+    /// `path` is where theirs would be saved (none without a home
+    /// directory).
     BuiltIn { path: Option<PathBuf> },
     /// A file tobiid skips for the built-in one: unreadable, or not a
     /// calibration.
@@ -101,7 +102,8 @@ pub(crate) struct Status {
 /// What a setup lacks for gaze on the screen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Missing {
-    /// No calibration of the user's: the tracker runs on the author's.
+    /// No calibration of the user's: the tracker runs on its coarse
+    /// power-up default.
     Calibration,
     /// The user's calibration, but no display area saved: it was made on
     /// the area the tracker had then (with `--no-display-setup`, or before
@@ -242,7 +244,7 @@ impl Status {
     fn describe_calibration(&self) -> String {
         match &self.calibration {
             Calibration::BuiltInChosen => format!(
-                "the built-in one, the author's ({}={})",
+                "the tracker's power-up default, coarse ({}={})",
                 store::ENV_OVERRIDE,
                 store::EMBEDDED
             ),
@@ -250,10 +252,10 @@ impl Status {
                 let none_at = path
                     .as_ref()
                     .map_or_else(String::new, |p| format!(" (none at {})", shown(p)));
-                format!("the built-in one, the author's{none_at}")
+                format!("the tracker's power-up default, coarse{none_at}")
             }
             Calibration::Unusable { path, why } => format!(
-                "the built-in one, the author's: {} is skipped ({why})",
+                "the tracker's power-up default, coarse: {} is skipped ({why})",
                 shown(path)
             ),
             Calibration::Own {

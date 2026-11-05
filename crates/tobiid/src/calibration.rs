@@ -1507,7 +1507,9 @@ pub(crate) mod tests {
             !path.exists(),
             "an empty apply reverts to the built-in calibration"
         );
-        assert_eq!(lock_state(&s.state).calibration.id, Some(1_904_654_973));
+        // The built-in one is the tracker's own power-up default.
+        assert_eq!(built_in_id(), Some(0));
+        assert_eq!(lock_state(&s.state).calibration.id, Some(0));
     }
 
     #[test]

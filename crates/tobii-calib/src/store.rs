@@ -2,7 +2,7 @@
 //!
 //! The daemon saves every calibration it computes or is given, and the engine
 //! uploads the saved one at init instead of the calibration embedded in its
-//! replay (which is the author's). Where it lives:
+//! replay (the tracker's power-up default, id 0). Where it lives:
 //!
 //! 1. `$TOBII_CALIBRATION` — a path, or `embedded` to ignore any saved file;
 //! 2. `$XDG_CONFIG_HOME/tobii/calibration.bin`;

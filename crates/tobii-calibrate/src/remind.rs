@@ -252,9 +252,9 @@ fn texts(reason: Missing, area_built_in: bool, language: Language) -> Texts {
             },
             body: match reason {
                 Missing::Calibration => format!(
-                    "Your Tobii Eye Tracker 5 runs on a calibration made for someone else{}, so \
-                     gaze on the screen lands away from where you look. Calibrating takes about \
-                     a minute; head tracking does not need it.",
+                    "Your Tobii Eye Tracker 5 has no calibration of yours yet and runs on its \
+                     coarse power-up default{}, so gaze on the screen lands away from where you \
+                     look. Calibrating takes about a minute; head tracking does not need it.",
                     if area_built_in {
                         ", and on a display area that is not your monitor's"
                     } else {
@@ -280,9 +280,10 @@ fn texts(reason: Missing, area_built_in: bool, language: Language) -> Texts {
             },
             body: match reason {
                 Missing::Calibration => format!(
-                    "Tobii Eye Tracker 5 работает на калибровке, сделанной для другого \
-                     человека{}, поэтому взгляд попадает не туда, куда вы смотрите. Калибровка \
-                     займёт около минуты. Для отслеживания головы она не нужна.",
+                    "У Tobii Eye Tracker 5 пока нет вашей калибровки, и он работает на \
+                     собственной грубой заводской калибровке{}, поэтому взгляд попадает не туда, \
+                     куда вы смотрите. Калибровка займёт около минуты. Для отслеживания головы \
+                     она не нужна.",
                     if area_built_in {
                         ", и с областью экрана не вашего монитора"
                     } else {

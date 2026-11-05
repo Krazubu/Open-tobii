@@ -889,13 +889,13 @@ TOBII_IMAGE83_DEBUG=1 ./target/release/tobii-opentrack
 ### 8a. Calibration
 
 The tracker needs calibrating once per user, on the monitor it is mounted
-on. Until then it runs on the calibration embedded in the init capture,
-which is the author's, and on the display area that capture carries:
+on. Until then it runs on the tracker's own power-up default (id 0), which
+the init capture uploads, and on the display area that capture carries:
 633.6 × 334.3 mm (a 28.2" screen, wider than 16:9), whatever your monitor
 is. The tracker scales gaze to its display area itself, so the area alone
 puts gaze off on any other screen: looking at the left and right edges of a
 24" 16:9 monitor reads about 0.08 and 0.92 instead of 0 and 1, of a 34" 21:9
-one about −0.13 and 1.13; the author's calibration adds an error of its own
+one about −0.13 and 1.13; the coarse default adds an error of its own
 everywhere.
 
 What needs it: whatever puts gaze on the screen — games and applications
@@ -910,9 +910,10 @@ setup never succeeded), was made on whatever area the tracker had, usually
 the capture's: calibrate again, with the display setup.
 
 Until you calibrate, the daemon's journal says so each time it starts the
-tracker, in two warnings: `calibration: the built-in one, made for someone
-else's eyes` and `display area: the init capture's, not your monitor's`.
-`tobii-calibrate --status` (below) says the same without the journal.
+tracker, in two warnings: `calibration: the built-in one, the tracker's
+power-up default (id 0): coarse` and `display area: the init capture's, not
+your monitor's`. `tobii-calibrate --status` (below) says the same without
+the journal.
 
 ```bash
 tobii-calibrate                         # display setup, then 14 points; Esc cancels

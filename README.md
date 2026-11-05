@@ -291,16 +291,17 @@ tools/headpose/truth.py --session LOG JSONL FITS ...         # yaw and pitch vs 
   the frame, `libtobii.so` marks its head pose invalid, as the Stream Engine
   does; `tobii-opentrack` then sends nothing, and OpenTrack holds the last
   pose.
-- Until you run `tobii-calibrate`, the calibration in use is the one embedded
-  in `init_packets_ep.txt` — the author's — and the display area is the one
-  that capture carries, 633.6 × 334.3 mm (a 28.2" screen, wider than 16:9),
-  whatever your monitor is. The tracker scales gaze to that area, so on any
-  other screen gaze misses the edges: looking at the left and right edges of
-  a 24" 16:9 monitor reads about 0.08 and 0.92, of a 49" 32:9 one about
-  −0.44 and 1.44. `tobii-calibrate` sets your area first (you line two ticks
-  up with the marks on the tracker), and the daemon keeps whatever display
-  area is set (`~/.config/tobii/display-area`). A calibration made with
-  `--no-display-setup`, or before 0.4.1 (whose display setup never
+- Until you run `tobii-calibrate`, the calibration in use is the tracker's
+  own power-up default (id 0), which `init_packets_ep.txt` uploads: coarse,
+  made for no one in particular, so gaze lands roughly. The display area is
+  the one that capture carries, 633.6 × 334.3 mm (a 28.2" screen, wider than
+  16:9), whatever your monitor is. The tracker scales gaze to that area, so
+  on any other screen gaze misses the edges: looking at the left and right
+  edges of a 24" 16:9 monitor reads about 0.08 and 0.92, of a 49" 32:9 one
+  about −0.44 and 1.44. `tobii-calibrate` sets your area first (you line two
+  ticks up with the marks on the tracker), and the daemon keeps whatever
+  display area is set (`~/.config/tobii/display-area`). A calibration made
+  with `--no-display-setup`, or before 0.4.1 (whose display setup never
   succeeded), was made on whatever area the tracker had, usually the
   capture's: calibrate again.
 - **Only the Eye Tracker 5** (`2104:0313`). A 5L, 4C or anything else answers
