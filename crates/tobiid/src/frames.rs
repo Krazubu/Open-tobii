@@ -99,7 +99,10 @@ fn gaze_raw_eye(eye: &EyeFrame) -> GazeRawEye {
 /// the device clock, as the record is. An eyeball centre is there only when
 /// the frame sent it, as the record flags it. The frame's host time goes
 /// with it, for what libtobii makes from the record on the host clock as the
-/// Stream Engine does (the foveated rendering gaze point).
+/// Stream Engine does (the foveated rendering gaze point), and, after it,
+/// the frame's responsive combined gaze point (key `0x20`) with its
+/// validity, which the Stream Engine's record does not keep: libtobii hands
+/// it out as the responsive gaze point stream.
 fn gaze_raw(g: &GazeSample) -> GazeRaw {
     let frame = &g.frame;
     let record = &frame.record;
@@ -118,6 +121,8 @@ fn gaze_raw(g: &GazeSample) -> GazeRaw {
         left_eyeball_center_mm: eyeball(record.left_eyeball_sent, &frame.left),
         right_eyeball_center_mm: eyeball(record.right_eyeball_sent, &frame.right),
         timestamp_system_us: Some(g.host_us),
+        responsive_gaze_point_on_display: Some(f32s(frame.gaze_raw.value)),
+        responsive_gaze_validity: u32::from(frame.gaze_raw.valid),
     }
 }
 
@@ -662,6 +667,11 @@ mod tests {
             [raw.left_eyeball_center_mm, raw.right_eyeball_center_mm],
             [Some(point(0x17)), Some(point(0x18))]
         );
+        // The responsive point is not part of the record: it rides in the
+        // tail with the host time, its validity the tracker's word as 1 or 0.
+        assert_eq!(raw.responsive_gaze_point_on_display, Some(point2(0x20)));
+        assert_eq!(word(0x1f), Some(1));
+        assert_eq!(raw.responsive_gaze_validity, 1);
     }
 
     /// Raw gaze passes a value whatever its validity, a word as sent rather
@@ -683,6 +693,12 @@ mod tests {
         frame.left.eyeball_center_mm.valid = false;
         frame.left.pupil_diameter_mm.valid = false;
         frame.gaze.valid = false;
+        // Its own point and validity: a word other than 1 is not valid, as
+        // `Valued::valid` carries it.
+        frame.gaze_raw = Valued {
+            valid: false,
+            value: [0.125, -0.5],
+        };
         // The right eye's status and pupil, which the ET5 always sends,
         // missing, and 0x0e, which it never sends, present.
         frame.right.status = None;
@@ -738,6 +754,8 @@ mod tests {
             [raw.left_eyeball_center_mm, raw.right_eyeball_center_mm],
             [Some(f32s(frame.left.eyeball_center_mm.value)), None]
         );
+        assert_eq!(raw.responsive_gaze_point_on_display, Some([0.125, -0.5]));
+        assert_eq!(raw.responsive_gaze_validity, 0);
 
         frame.record.combined_gaze_validity = None;
         assert_eq!(raw_gaze_of(frame).combined_gaze_validity, 0);
