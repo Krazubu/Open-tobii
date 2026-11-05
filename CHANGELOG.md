@@ -10,7 +10,7 @@ change. Where an answer differs from the Windows DLL's, and the difference is
 known, docs/stream-engine-api.md says so, by entry point or by family: with
 its reason, or marked as a mistake where it is one.
 
-## Unreleased
+## 0.6.0 — 2026-11-05
 
 ### Changed
 
