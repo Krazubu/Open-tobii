@@ -8,8 +8,25 @@ This project keeps no compatibility promise of its own below 1.0, but
 Stream Engine 4.25.0.3 and is held to them by `make verify-abi` on every
 change. Where an answer differs from the Windows DLL's, and the difference is
 known, docs/stream-engine-api.md says so, by entry point or by family: with
-its reason, or marked as a mistake where it is one, as the responsive gaze
-point is.
+its reason, or marked as a mistake where it is one.
+
+## Unreleased
+
+### Fixed
+
+- **`tobii_responsive_gaze_point_subscribe` hands out the tracker's
+  responsive gaze point, not the filtered one.** 4.25's stream 12 is for the
+  tracker's own "Remote Gaze Point Responsive Combined" (stream 0x83 key
+  0x20 with validity 0x1f); until now libtobii handed out the filtered
+  combined point (key 0x1c) of its raw-gaze record, counting any non-zero
+  validity word as valid. `tobiid` now carries key 0x20 and its validity in
+  the tail of that record, with the frame's host time, and libtobii hands
+  them out, valid only when the tracker's word is 1. The record's C layout is
+  unchanged and the daemon protocol stays compatible both ways: a `tobiid`
+  from before the tail feeds nothing, as one without the frame's host time
+  already did, and an older client ignores the tail. `tobii_stream_supported`
+  still reports 12 supported; the DLL, driving an ET5 itself, most likely
+  refuses the subscribe, as docs/stream-engine-api.md says.
 
 ## 0.5.0 — 2026-11-02
 

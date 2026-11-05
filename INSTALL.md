@@ -610,9 +610,9 @@ TOBII_IMAGE83_DEBUG=1 ./target/release/tobii-opentrack
   to the tracker (`tobii_send_custom_command`). Of the forty-six entry
   points Stream Engine 4.25 adds, seventeen give real answers too: the fault
   and warning lists and their streams, 4.25's presence stream, the
-  responsive gaze point (though, by a mistake not yet fixed, it carries the
-  filtered point), the output-frequency stream, whether the extended lens
-  configuration can be written (never), and the four signing calls.
+  responsive gaze point (the tracker's own unfiltered point, key `0x20`),
+  the output-frequency stream, whether the extended lens configuration can be
+  written (never), and the four signing calls.
   `tobii_hardware_configuration_get` is provisional: the ET5 has
   reported no hardware configuration on Linux, so it returns
   `TOBII_ERROR_NOT_SUPPORTED`.

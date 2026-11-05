@@ -323,10 +323,10 @@ tools/headpose/truth.py --session LOG JSONL FITS ...         # yaw and pitch vs 
   proximity data collection, `tobii_force_frame_sequence` and
   `tobii_set_algo_box_mode`. Each checks its arguments, and none invents data.
   The other seventeen give real answers: the fault and warning lists and their
-  streams, 4.25's presence stream, the responsive gaze point (though, by a
-  mistake not yet fixed, it carries the filtered point), the output-frequency
-  stream, whether the extended lens configuration can be written (never), and
-  the four signing calls, which need no device at all.
+  streams, 4.25's presence stream, the responsive gaze point (the tracker's
+  own unfiltered point, key `0x20`), the output-frequency stream, whether the
+  extended lens configuration can be written (never), and the four signing
+  calls, which need no device at all.
   [docs/stream-engine-api.md](docs/stream-engine-api.md#what-425-added) says
   what each answers and where that differs from the DLL.
 - The calibration sequence mirrors the one captured from Windows; 3-D and

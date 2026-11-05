@@ -454,7 +454,7 @@ marked so here.
 
 | | Entry points |
 |---|---|
-| Implemented (daemon-backed) | the tracker's fault and warning lists, read (`tobii_get_faults`, `tobii_get_warnings`) and as streams (`tobii_faults_subscribe`, `tobii_warnings_subscribe`); 4.25's presence stream (`tobii_presence_subscribe`); the responsive gaze point (`tobii_responsive_gaze_point_subscribe`, `tobii_stream_t` 12, which `tobii_stream_supported` reports supported), which by mistake carries the filtered point (below) |
+| Implemented (daemon-backed) | the tracker's fault and warning lists, read (`tobii_get_faults`, `tobii_get_warnings`) and as streams (`tobii_faults_subscribe`, `tobii_warnings_subscribe`); 4.25's presence stream (`tobii_presence_subscribe`); the responsive gaze point (`tobii_responsive_gaze_point_subscribe`, `tobii_stream_t` 12, which `tobii_stream_supported` reports supported), which carries the tracker's own unfiltered point (key `0x20`) |
 | Answered locally | the output-frequency stream (`tobii_output_frequency_subscribe`: 33 Hz, once); the four signing calls (`tobii_signing_sign`, `tobii_signing_sign_with_private_key`, `tobii_signing_verify`, `tobii_signing_verify_with_public_key`), which need no device; whether the extended lens configuration can be written (`tobii_lens_configuration_extended_writable`: never, as for the basic one, and, inferred, as the DLL answers) |
 | `TOBII_ERROR_NOT_SUPPORTED` | the internal streams 4.25 added: proximity data collection (`tobii_proximity_data_collection_subscribe`), the wearable entrance pupil position (`tobii_wearable_entrance_pupil_position_subscribe`), the primary camera image (`tobii_primary_camera_image_subscribe`, a stream of its own; the IR image is `tobii_image_subscribe`'s), the wearable diagnostics image and the wearable image (`tobii_wearable_diagnostics_image_subscribe`, `tobii_wearable_image_subscribe`), the device log (`tobii_device_log_subscribe`; not the log `tobii_logs_retrieve` fetches), absolute eye openness (`tobii_absolute_eye_openness_subscribe`) and the 3-D facial landmarks (`tobii_facial_landmarks_3d_subscribe`); multiple faces, under its new name (`tobii_multiple_faces_subscribe`); the ambient light level (`tobii_ambient_light_level_subscribe`), the facial-landmark groups (`tobii_facial_landmarks_groups_enumerate`) and the algorithm-debug stream (`tobii_algodbg_stream_subscribe`; the ET5's own stream named "algodbg", 0x1770, is custom stream 0); the remote cameras (`tobii_remote_cameras_enumerate`, `tobii_remote_camera_set`, `tobii_remote_camera_listener_subscribe`); reading and writing the extended lens configuration (`tobii_get_lens_configuration_extended`, `tobii_set_lens_configuration_extended`); and the two PRP commands `tobii_force_frame_sequence` and `tobii_set_algo_box_mode` (the DLL's own answer for a tracker it drives itself, once the arguments check out: read for the internal streams' subscribes and the ambient light level's, inferred for the rest; absolute eye openness is below) |
 
@@ -528,25 +528,24 @@ Where the answers come from, and where they differ from Windows:
   device asks of the daemon, which reports the standing presence only to a
   connection newly asking for it. Nothing chose that; in the DLL the two are
   separate subscriptions.
-- **The responsive gaze point is the filtered one.** 4.25's stream 12 is for
-  the tracker's responsive combined gaze point, which an ET5 sends, by its own
-  column names, as key 0x20 of each gaze frame, unfiltered: the mean of the
-  eyes' 2-D points while both are tracked, the tracked eye's while one is
-  (`crates/tobii-proto/src/gaze83.rs`).
-  `tobii_responsive_gaze_point_subscribe` hands out the combined point of the
-  daemon's raw-gaze record instead, which `tobiid` fills, as the Stream Engine
-  fills its own, from the filtered point (key 0x1c): the point and host time
-  `tobii_gaze_point_subscribe` delivers, valid whenever the tracker's validity
-  word is not 0, where the gaze point is valid only when it is 1, and nothing
-  at all from a `tobiid` too old to stamp that record with the host time. It
-  **differs by mistake** from what the stream is for, as its header says;
-  handing out key 0x20 needs `tobiid` to send it, which no daemon message
-  does. The DLL itself most likely refuses the subscribe for a tracker it
-  drives, an ET5 included: its stream check answers for 12 as for the gaze
-  point, but its legacy-TTP module answers the subscribe of PRP stream 0x1d,
-  which 12 maps to, with a not-supported stub, as for the device log
-  (`streams.rs`, `tobii/tobii_streams.h`). Subscribing to it alone starts the
-  daemon's raw-gaze stream, as `tobii_gaze_raw_subscribe` does.
+- **The responsive gaze point.** 4.25's stream 12 is for the tracker's
+  responsive combined gaze point, which an ET5 sends, by its own column
+  names, as key 0x20 of each gaze frame with validity 0x1f, unfiltered: the
+  mean of the eyes' 2-D points while both are tracked, the tracked eye's
+  while one is (`crates/tobii-proto/src/gaze83.rs`).
+  `tobii_responsive_gaze_point_subscribe` hands that point out, from the tail
+  `tobiid` adds to its raw-gaze record, with the frame's host time; it is
+  valid only while the tracker's validity word is 1, as the gaze point is.
+  A record from a `tobiid` from before the tail, or without the host time,
+  feeds nothing, rather than the filtered point. Subscribing to it alone
+  starts the daemon's raw-gaze stream, as `tobii_gaze_raw_subscribe` does.
+  The DLL itself most likely refuses the subscribe for a tracker it drives,
+  an ET5 included: its stream check answers for 12 as for the gaze point, but
+  its legacy-TTP module answers the subscribe of PRP stream 0x1d, which 12
+  maps to, with a not-supported stub, as for the device log
+  (`streams.rs`, `tobii/tobii_streams.h`). Handing out the point on the
+  tracker's own key is the same policy as the user position guide, which the
+  DLL's legacy-TTP path never reports.
 - **Output frequency.** `tobii_output_frequency_subscribe` calls its receiver
   once, with 33 Hz, on the calling thread before it returns, and never again:
   the ET5 runs at that one frequency (*Notifications*). The DLL's source for
