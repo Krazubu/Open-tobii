@@ -55,11 +55,16 @@ pub fn track_box_24(msg: &Message<'_>) -> Option<[f32; 24]> {
 
 /// Command 1650: the current output rate (Hz).
 pub fn output_rate(msg: &Message<'_>) -> Option<u32> {
+    // Command 1650 carries two words after the output-rate field id: the sensor
+    // rate then the output rate in Hz (132, 33 on the ET5). PETM wants the
+    // output rate, so take the second word, not the first (which gave a wrong
+    // 132 that made PETM reject the device before opening the positioning
+    // guide).
     let entries: Vec<Tlv<'_>> = msg.tlvs().collect();
     entries
         .windows(3)
         .find(|w| w[0].field_id() == Some(FIELD_OUTPUT_RATE))
-        .and_then(|w| w[1].u32())
+        .and_then(|w| w[2].u32())
 }
 
 /// Command 1420: the device identity strings, in order: serial, model,
