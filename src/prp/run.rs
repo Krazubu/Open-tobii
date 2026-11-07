@@ -13,7 +13,7 @@ use crate::ttp::calibration::{self, cmd as calcmd};
 use crate::ttp::gaze83::{self, EyeFrame};
 use crate::ttp::session::Session;
 use crate::ttp::{facts, protocol::cmd, protocol::parse_message, protocol::STREAM_ID_GAZE};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -30,13 +30,20 @@ struct Subs {
 type SubSink = Arc<Mutex<Option<Channel>>>;
 
 /// The property values PETM reads, filled from the device at start-up.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Properties {
-    pub display_area: [f32; 9],
+    /// The display area PETM sees. PETM writes it (PROPERTY_SET) when a display
+    /// setup is selected and reads it back to confirm; it must round-trip, so
+    /// it is interior-mutable. Seeded from the device's own value.
+    pub display_area: Mutex<[f32; 9]>,
     pub track_box: [f32; 24],
     pub output_frequency: f32,
     pub device_name: String,
-    pub calibration_id: u32,
+    /// The active calibration's id. PETM reads it and expects it to change
+    /// after a compute; the runtime generates it client-side (it is an opaque
+    /// identifier for the calibration the device computed, not a licence), so
+    /// the bridge assigns one on compute. Interior-mutable.
+    pub calibration_id: AtomicU32,
     pub calibration_active: bool,
     pub enabled_eye: u32,
 }
@@ -45,17 +52,17 @@ impl Properties {
     /// Read the device's geometry and identity once.
     pub fn read_from(session: &Session) -> Self {
         let mut p = Properties {
-            display_area: [0.0; 9],
+            display_area: Mutex::new([0.0; 9]),
             track_box: [0.0; 24],
             output_frequency: 33.0,
             device_name: "Tobii Eye Tracker 5".into(),
-            calibration_id: 0,
+            calibration_id: AtomicU32::new(0),
             calibration_active: false,
             enabled_eye: 0,
         };
         if let Ok(b) = session.command(cmd::DISPLAY_AREA_GET, &[0, 0]) {
             if let Some(a) = parse_message(&b).and_then(|m| facts::display_area_9(&m)) {
-                p.display_area = a;
+                *p.display_area.lock().unwrap() = a;
             }
         }
         if let Ok(b) = session.command(cmd::TRACK_BOX, &[0, 0]) {
@@ -84,17 +91,34 @@ impl Properties {
     /// The PRP value for a property id, or `None` if we do not serve it.
     fn value(&self, property: u32) -> Option<PropValue> {
         Some(match property {
-            prop::DISPLAY_AREA => PropValue::Floats(self.display_area.to_vec()),
+            prop::DISPLAY_AREA => PropValue::Floats(self.display_area.lock().unwrap().to_vec()),
             prop::TRACK_BOX_COMBINED_GAZE => PropValue::Floats(self.track_box.to_vec()),
             prop::OUTPUT_FREQUENCY => PropValue::F32(self.output_frequency),
             prop::DEVICE_NAME => PropValue::Str(self.device_name.clone()),
-            prop::CALIBRATION_ID => PropValue::U32(self.calibration_id),
+            prop::CALIBRATION_ID => PropValue::U32(self.calibration_id.load(Ordering::Relaxed)),
             prop::CALIBRATION_ACTIVE => PropValue::U32(self.calibration_active.into()),
             prop::ENABLED_EYE => PropValue::U32(self.enabled_eye),
             prop::POWER_SAVE_ACTIVE | prop::DEVICE_PAUSED | prop::EXCLUSIVE_MODE => PropValue::U32(0),
             prop::FAULTS | prop::WARNINGS => PropValue::Str(String::new()),
             _ => return None,
         })
+    }
+
+    /// Store the display area PETM selected, so later reads of DISPLAY_AREA
+    /// return it (PETM confirms the setup by reading back what it wrote).
+    fn set_display_area(&self, area: [f32; 9]) {
+        *self.display_area.lock().unwrap() = area;
+    }
+
+    /// Assign and store a new calibration id (what the runtime does after a
+    /// compute). Returns it so the change can be notified. Never zero.
+    fn new_calibration_id(&self) -> u32 {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(1, |d| d.subsec_nanos() ^ d.as_secs() as u32)
+            | 1;
+        self.calibration_id.store(now, Ordering::Relaxed);
+        now
     }
 }
 
@@ -193,8 +217,8 @@ pub fn run_server(session: Arc<Session>, listener: Listener, props: Arc<Properti
     loop {
         match listener.accept_command() {
             Ok(ch) => {
-                let (session, props, subs) = (session.clone(), props.clone(), subs.clone());
-                std::thread::spawn(move || serve_command(ch, &session, &props, &subs));
+                let (session, props, subs, sink) = (session.clone(), props.clone(), subs.clone(), sink.clone());
+                std::thread::spawn(move || serve_command(ch, &session, &props, &subs, &sink));
             }
             Err(e) => {
                 eprintln!("prp: command accept failed: {e}");
@@ -205,7 +229,7 @@ pub fn run_server(session: Arc<Session>, listener: Listener, props: Arc<Properti
 }
 
 /// Serve one command connection until it closes.
-fn serve_command(mut command: Channel, session: &Session, props: &Properties, subs: &Subs) {
+fn serve_command(mut command: Channel, session: &Session, props: &Properties, subs: &Subs, sink: &SubSink) {
     let debug = std::env::var("PRP_DEBUG").is_ok();
     loop {
         let req = match command.read_frame() {
@@ -234,17 +258,41 @@ fn serve_command(mut command: Channel, session: &Session, props: &Properties, su
                 translate::property_enumerate_response(tx, property, &vals)
             }
             // Property set: echo the property and the value back as accepted.
+            // DISPLAY_AREA is the one PETM actually writes (selecting a display
+            // setup): store it so reads return it, and notify the change, or
+            // PETM reports "we don't recognize this display setup" and will not
+            // let the setup be selected.
             op::PROPERTY_SET_REQUEST => {
                 let property = property_of(&req);
                 let value = req.parts.get(1).cloned().unwrap_or_default();
+                if property == prop::DISPLAY_AREA {
+                    if let Ok(area) = <[f32; 9]>::try_from(
+                        value.words.iter().map(|w| f32::from_bits(*w)).collect::<Vec<_>>(),
+                    ) {
+                        props.set_display_area(area);
+                        push_notification(sink, prop::DISPLAY_AREA, PropValue::Floats(area.to_vec()));
+                        if debug {
+                            eprintln!("display area set to {area:?}");
+                        }
+                    }
+                }
                 Message::new(tx, op::PROPERTY_SET_RESPONSE, vec![Struct::new(vec![0, property]), value])
             }
-            op::COMMAND_REQUEST => handle_command(session, props, subs, &req),
+            op::COMMAND_REQUEST => handle_command(session, props, subs, sink, &req),
             other => {
                 eprintln!("prp: unhandled operation {other}");
                 continue;
             }
         };
+        if debug {
+            let summary: Vec<String> = resp
+                .parts
+                .iter()
+                .take(3)
+                .map(|s| format!("{:?}+{}v", s.words, s.var.len()))
+                .collect();
+            eprintln!("cmd> op {} resp {}", resp.operation, summary.join(" "));
+        }
         if command.write_frame(&resp).is_err() {
             break;
         }
@@ -279,7 +327,27 @@ fn property_of(req: &Message) -> u32 {
     req.parts.first().and_then(|s| s.word(0)).unwrap_or(0)
 }
 
-fn handle_command(session: &Session, props: &Properties, subs: &Subs, req: &Message) -> Message {
+/// Push a property-change notification to the current subscription sink (tx 0,
+/// as the runtime does). PETM waits for these during calibration (e.g.
+/// CALIBRATION_ACTIVE after clear) before it will show the next screen.
+fn push_notification(sink: &SubSink, property: u32, value: PropValue) {
+    let debug = std::env::var("PRP_DEBUG").is_ok();
+    match sink.lock().unwrap().as_ref() {
+        Some(ch) => {
+            let ok = ch.write_frame(&translate::property_notification(property, &value)).is_ok();
+            if debug {
+                eprintln!("notify: property {property} pushed (write ok={ok})");
+            }
+        }
+        None => {
+            if debug {
+                eprintln!("notify: property {property} NOT pushed (no sub sink)");
+            }
+        }
+    }
+}
+
+fn handle_command(session: &Session, props: &Properties, subs: &Subs, sink: &SubSink, req: &Message) -> Message {
     let tx = req.transaction;
     let command = cmd_id(req);
     let arg = property_of_arg(req);
@@ -340,8 +408,17 @@ fn handle_command(session: &Session, props: &Properties, subs: &Subs, req: &Mess
         // Calibration. Each PRP command maps to its TTP command; the ported
         // `calibration` module builds the payloads. Best-effort: this path is
         // validated with PETM driving a real calibration, not locally.
-        9 => calib(session, tx, command, calcmd::CLEAR, &[0, 0]),
-        15 => calib(session, tx, command, calcmd::START, &[0, 0]),
+        // Calibration clear: the runtime marks calibration active and notifies
+        // it before answering. PETM waits for this before showing the points.
+        9 => {
+            push_notification(sink, prop::CALIBRATION_ACTIVE, PropValue::U32(1));
+            calib(session, tx, command, calcmd::CLEAR, &[0, 0])
+        }
+        // Calibration start: the runtime notifies the (reset) calibration id.
+        15 => {
+            push_notification(sink, prop::CALIBRATION_ID, PropValue::U32(0));
+            calib(session, tx, command, calcmd::START, &[0, 0])
+        }
         11 => {
             let x = f32::from_bits(req.parts.get(1).and_then(|s| s.word(0)).unwrap_or(0));
             let y = f32::from_bits(req.parts.get(1).and_then(|s| s.word(1)).unwrap_or(0));
@@ -349,9 +426,21 @@ fn handle_command(session: &Session, props: &Properties, subs: &Subs, req: &Mess
             payload.extend_from_slice(&calibration::collect_payload(x, y, calibration::EYES_BOTH));
             calib(session, tx, command, calcmd::COLLECT_2D, &payload)
         }
-        16 => calib(session, tx, command, calcmd::COMPUTE, &[0, 0]),
+        // Calibration compute and apply: the device computes, then the runtime
+        // assigns a new calibration id and notifies it. PETM waits for the id
+        // notification before continuing (it fails after the first points
+        // without it).
+        16 => {
+            let resp = calib(session, tx, command, calcmd::COMPUTE, &[0, 0]);
+            push_notification(sink, prop::CALIBRATION_ID, PropValue::U32(props.new_calibration_id()));
+            resp
+        }
         17 => calibration_retrieve(session, tx, command),
-        10 => calib(session, tx, command, calcmd::STOP, &[0, 0]),
+        // Calibration stop: the runtime marks calibration inactive and notifies.
+        10 => {
+            push_notification(sink, prop::CALIBRATION_ACTIVE, PropValue::U32(0));
+            calib(session, tx, command, calcmd::STOP, &[0, 0])
+        }
         // Licence key retrieve: return the licence the device holds (replayed
         // from this device; not a fabricated verdict). PETM reads it during
         // discovery and will not list the device without it.

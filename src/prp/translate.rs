@@ -106,9 +106,12 @@ pub fn property_notification(property: u32, value: &PropValue) -> Message {
     Message::new(0, op::PROPERTY_NOTIFICATION, vec![Struct::new(vec![property]), value.value_struct()])
 }
 
-/// A plain command response (op 10) with no result payload: `{error, command}`.
+/// A plain command response (op 10) with an empty result: `{error, command}`
+/// then an empty results struct. The runtime always sends the results struct
+/// (size 4, no fields) even when a command returns nothing; omitting it makes
+/// PETM reject the response, which aborts calibration right after the clear.
 pub fn command_ok(transaction: u32, command: u32) -> Message {
-    Message::new(transaction, op::COMMAND_RESPONSE, vec![Struct::new(vec![0, command])])
+    Message::new(transaction, op::COMMAND_RESPONSE, vec![Struct::new(vec![0, command]), Struct::new(vec![])])
 }
 
 /// A command response that echoes a single `u32` argument (as the stream
