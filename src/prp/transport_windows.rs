@@ -229,7 +229,12 @@ pub struct Listener {
 
 impl Listener {
     pub fn bind(serial: &str) -> io::Result<Self> {
-        let main_name = format!("TOBIIPRP-{serial}");
+        // The command pipe is normally `TOBIIPRP-<serial>`, which PETM finds by
+        // enumerating `TOBIIPRP-*`. PRP_MAIN_PIPE overrides it (to a name PETM
+        // does not enumerate) so a logging relay can take the discoverable name
+        // and forward to us. The sub/ts pipe names are unchanged: PETM learns
+        // them from the command ack and reaches them directly.
+        let main_name = std::env::var("PRP_MAIN_PIPE").unwrap_or_else(|_| format!("TOBIIPRP-{serial}"));
         drop(inbound_instance(&main_name)?); // fail now if the name is taken
         Ok(Listener {
             main_name,
