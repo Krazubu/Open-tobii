@@ -34,8 +34,12 @@ pub enum Model {
     /// Fully supported: the embedded init capture drives it.
     EyeTracker5,
     /// Tobii Pro Spark — the entry-level Pro tracker (`TPE01` serial,
-    /// `TPSP1` firmware, platform codename *Castor*). Recognised on the bus,
-    /// but not yet drivable: no init replay has been captured for it.
+    /// `TPSP1` firmware, platform codename *Castor*). Speaks the same
+    /// TTP-over-USB protocol as the ET5 and is driven by the same embedded
+    /// init: replaying it onto a Spark brings the device up and arms its gaze
+    /// stream (verified live). Two of the ET5 init's licence/signature
+    /// commands (ids `0x777`, `0x848`) come back `UNAUTHORIZED` on a Spark,
+    /// which is harmless — gaze still streams. See `docs/spark.md`.
     ProSpark,
 }
 
@@ -86,12 +90,13 @@ impl ModelInfo {
 
 /// The registry of supported models.
 ///
-/// ET5 is fully populated. Spark carries its confirmed USB facts (VID/PID
-/// `2104:031C`, product `"EyeChip"`, one vendor-class interface with three
-/// endpoints — the same transport topology as the ET5) and, pending a capture,
-/// an [`InitSource::Unavailable`]. The Spark endpoint addresses are assumed to
-/// match the ET5 (bulk `0x05` OUT / `0x83` IN) from the shared Castor
-/// TTP-over-USB transport; verify against a real capture before relying on them.
+/// Both the ET5 and the Spark are fully populated and drivable by the shared
+/// embedded init. The Spark's USB facts (VID/PID `2104:031C`, product
+/// `"EyeChip"`, one vendor-class interface 0 with bulk `0x83` IN / `0x05` OUT,
+/// plus an extra bulk OUT `0x04` this crate does not use) were confirmed
+/// against a live unit, and replaying the ET5 init onto it arms its gaze
+/// stream. [`InitSource::Unavailable`] remains for any future model recognised
+/// before its init is known.
 pub const MODELS: &[ModelInfo] = &[
     ModelInfo {
         model: Model::EyeTracker5,
@@ -113,9 +118,10 @@ pub const MODELS: &[ModelInfo] = &[
         iface: IFACE,
         ep_in: EP_IN,
         ep_out: EP_OUT,
-        init: InitSource::Unavailable(
-            "no init replay captured for the Pro Spark yet; see docs/spark.md",
-        ),
+        // The Spark is driven by the shared embedded ET5 init: replaying it
+        // brings the device up and arms gaze (verified live). Interface 0 also
+        // exposes an extra bulk OUT 0x04 which this crate does not use.
+        init: InitSource::Embedded,
     },
 ];
 
@@ -155,11 +161,12 @@ mod tests {
     }
 
     #[test]
-    fn recognises_the_spark_but_it_is_not_drivable() {
+    fn recognises_the_spark_and_it_is_drivable() {
         let m = recognise(0x2104, 0x031C).expect("Spark recognised");
         assert_eq!(m.model, Model::ProSpark);
         assert_eq!(m.serial_prefix, "TPE01");
-        assert!(!m.is_drivable());
+        // The Spark is driven by the shared embedded ET5 init (verified live).
+        assert!(m.is_drivable());
     }
 
     #[test]

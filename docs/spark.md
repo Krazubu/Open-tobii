@@ -1,10 +1,12 @@
 # Tobii Pro Spark support (model `TPE01` / platform `TPSP1`)
 
 This documents what is known about the **Tobii Pro Spark** and how it is wired
-into this codebase. The Spark is **recognised on the USB bus and reported**, but
-**not yet drivable**: the one missing piece is a captured init replay (see
-[Gaps](#gaps)). Until that lands, `tobii-usb` finds a Spark and refuses it with a
-clear message rather than replaying the Eye Tracker 5's init onto it.
+into this codebase. The Spark speaks the **same TTP-over-USB protocol as the
+Eye Tracker 5** and is driven by the **same embedded init**: replaying the ET5
+init onto a Spark brings the device up and **arms its gaze stream** (verified
+live, see [Live validation](#live-validation)). It is recognised, reported and
+driven like the ET5; the model registry only tells the two apart by USB product
+id.
 
 ## USB identity (confirmed against a live Spark)
 
@@ -17,14 +19,13 @@ clear message rather than replaying the Eye Tracker 5's init onto it.
 | `bcdDevice` | — | `0x0100` |
 | USB speed | — | high-speed (USB 2.0) |
 | Configurations | 1 | 1 |
-| Interface 0 | vendor class `0xFF`, 3 endpoints | vendor class `0xFF`, 3 endpoints |
+| Interface 0 | vendor class `0xFF`, 3 EPs: `0x83` IN, `0x05` OUT | vendor class `0xFF`, 3 EPs: `0x83` IN, `0x05` OUT, **`0x04` OUT** |
 
-The Spark presents the **same transport topology** as the ET5: a single
-vendor-specific interface 0 with three endpoints. This crate assumes the same
-endpoint addresses as the ET5 — bulk **`0x05` OUT** / **`0x83` IN** plus a third
-(interrupt) endpoint — because the two share the platform's TTP-over-USB
-transport (see below). **This assumption is not yet verified against a capture
-of the endpoint descriptors; confirm it before relying on streaming.**
+Endpoints confirmed from the live device: interface 0 is vendor class `0xFF`
+with three bulk endpoints (max packet 512). Both models share bulk **`0x83`
+IN** and **`0x05` OUT**; the Spark adds an **extra bulk OUT `0x04`** that this
+crate does not use (role unknown — a second command/data channel). Driving the
+Spark over `0x05`/`0x83` alone is enough to bring it up and stream gaze.
 
 The `EyeChip` product string and serial prefix are hints only. The authoritative
 model identity (`IS5FF`, `TPE01`, …) is reported by the device over TTP and
@@ -63,36 +64,53 @@ Firmware family is **TPSP1** (the Eye Tracker Manager fetches
 `downloadable-content/drivers/spark.json`), and `TPE01` appears in Eye Tracker
 Manager's `supportedTrackerPrefixes`.
 
+## Live validation
+
+Verified on a live Spark (`TPE01-100205013153`, fw `615b6e3dfa`) on macOS:
+
+1. The Spark answers the Tobii control protocol (SCP, vendor request 48):
+   `/hw/platformtype=IS5LPROENTRY`, `/fw/fwversion=615b6e3dfa`.
+2. Replaying tobii-usb's embedded ET5 init (`calibration::embedded_packets`,
+   202 packets) onto the Spark after `vendor_control_init` **succeeds**: 41
+   responses, and `wait_for_gaze_stream` returns **armed** — the Spark streams
+   gaze under this crate's control.
+3. Only two init commands come back non-zero, both `0x20000505` UNAUTHORIZED,
+   on ids `0x777` and `0x848` — the ET5 licence/signature-carrying commands.
+   They are **harmless**: gaze arms regardless. A Spark-native init could drop
+   or replace them (see below).
+
+Separately, Tobii's own SDK (PETM 2.7.2 with the Pro SDK 1.11 module, over
+`tobii-et5-bridge`) was captured driving the Spark through a full session —
+init, display-area write (id `0x5a0`, 188 bytes vs the ET5's 164), stream
+subscribe, calibration, and live gaze/eye-image frames. That capture is the
+ground truth for a Spark-native init if one is built later.
+
 ## How it is wired in this codebase
 
-- `crates/tobii-usb/src/models.rs` — the model registry. `Model::ProSpark`
-  carries the confirmed USB facts above and an `InitSource::Unavailable` (no init
-  replay yet). `Model::EyeTracker5` is `InitSource::Embedded`.
+- `crates/tobii-usb/src/models.rs` — the model registry. Both
+  `Model::EyeTracker5` and `Model::ProSpark` are `InitSource::Embedded` and
+  drivable; they are told apart only by USB product id. `InitSource::Unavailable`
+  remains for any future model recognised before its init is known.
 - `crates/tobii-usb/src/device.rs` — discovery (`open_tobii`, `tobii_address`)
-  now matches the whole registry via `models::recognise(vid, pid)`, logs which
-  model was found, and `open_tobii` refuses a recognised-but-not-drivable model
-  with an explicit error instead of replaying the ET5 init.
-- The ET5 path is unchanged: same endpoints, same embedded
-  `init_packets_ep.txt`, same calibration splicing.
+  matches the whole registry via `models::recognise(vid, pid)`, logs which model
+  was found, and refuses a recognised-but-not-drivable model with an explicit
+  error. The Spark takes the same path as the ET5: same endpoints, same embedded
+  `init_packets_ep.txt`, same calibration/display-area splicing.
 
-## Gaps (what is still needed to actually drive a Spark)
+## Gaps / possible refinements
 
-1. **Init replay capture.** The ET5 is driven by an embedded capture
-   (`crates/tobii-usb/init_packets_ep.txt`, replayed by
-   `calibration::embedded_packets`). The Spark needs its own equivalent —
-   captured from the Castor runtime ↔ Spark handshake (USB sniffer / `usbmon` on
-   Linux, or by instrumenting the macOS runtime), or reconstructed statically
-   from `platmod_castor_IS5.cpp`. Drop-in plan: add a Spark init resource and
-   point `Model::ProSpark.init` at it (mirroring the ET5's `InitSource::Embedded`
-   path), then teach `calibration`/`device` to select the per-model init.
-2. **Calibration-blob byte offsets.** On the ET5 the calibration blob is spliced
-   out of `packets[38..200]` of the embedded init. The Spark's init will have its
-   own offsets; `embedded_blob` / `substitute_calibration` must be
-   parameterised per model once the Spark capture exists.
-3. **Endpoint addresses.** Assumed `0x05`/`0x83` from the shared transport;
-   confirm against the Spark's real endpoint descriptors.
-4. **Stream catalogue specifics.** Output frequencies, image stream size
+1. **Full daemon run.** Init + gaze arming is verified; a complete `tobiid`
+   session on the Spark (stream catalogue columns, presence, head pose, a real
+   calibration round-trip) has not been exercised end to end.
+2. **Spark-native init.** The Spark runs on the shared ET5 init. A Spark-specific
+   `init_packets` built from the captured session (`spark-full-capture.tsv`)
+   could drop the two UNAUTHORIZED licence commands (ids `0x777`, `0x848`), carry
+   the Spark's extra property reads (`0x4ba`, `0xbf4`, `0xc08`, `0x6a4`) and its
+   188-byte display area, and embed a Spark calibration blob. This would mean a
+   per-model init resource and parameterising the blob splice (`embedded_blob` /
+   `substitute_calibration`, today keyed to the ET5's `packets[38..200]`).
+3. **Extra bulk OUT `0x04`.** Present on the Spark, unused here; its role is
+   unknown. Not needed for gaze.
+4. **Stream catalogue specifics.** Output frequencies, image-stream size
    (`READ_BUF` is sized for the ET5's 78609-byte image message), display
-   generation and capability differences are unverified for the Spark.
-5. **Live bring-up.** None of the above has been exercised against a streaming
-   Spark; discovery/refusal is all that is currently validated.
+   generation and capability differences are not yet characterised for the Spark.
