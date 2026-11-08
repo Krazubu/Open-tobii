@@ -183,4 +183,4 @@ jobs:
         run: >
           gh release create "$GITHUB_REF_NAME" dist/*
           --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes
-          --title "tobii-linux ${GITHUB_REF_NAME#v}"
+          --title "Open-tobii ${GITHUB_REF_NAME#v}"
