@@ -183,6 +183,15 @@ fn prp_server() {
     };
     let props = Arc::new(prp::run::Properties::read_from(&session));
     log!("device ready: '{}', {} Hz", props.device_name, props.output_frequency);
+    // Start the image stream first, as the Windows Stream Engine, tobii-linux
+    // and `ttp-probe` do: on the ET5 it drives the camera and its IR
+    // illuminators, without which the device tracks no eye — so a calibration
+    // collects only invalid samples and fails. The forwarder ignores these
+    // frames; they are only to keep the tracker's eyes lit.
+    match session.start_stream(ttp::protocol::STREAM_ID_IMAGE) {
+        Ok(()) => log!("image stream 0x50e started (drives the illuminators)"),
+        Err(e) => log!("image stream start failed: {e}"),
+    }
     // Start the gaze stream now so the device streams continuously; the
     // forwarder relays it to a client once it subscribes.
     match session.start_stream(ttp::protocol::STREAM_ID_GAZE) {

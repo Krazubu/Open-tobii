@@ -348,3 +348,33 @@ pub fn builtin_init_packets() -> Vec<Vec<u8>> {
     const TEXT: &str = include_str!("../../assets/ttp_init_packets.txt");
     protocol::parse_init_packets(TEXT).expect("built-in init packets parse").into_iter().map(|p| p.data).collect()
 }
+
+/// The calibration blob the init replay uploads (command 1110, pieces 38..200
+/// of the init packets). Opening a calibration session seeds the device's
+/// sample ring by writing this blob back (1110); the device holds no
+/// user calibration to read, so a 1100 read comes back empty. Extracted exactly
+/// as tobii-linux's `tobii_usb::calibration::embedded_blob` does, from the
+/// byte-identical init file.
+pub fn embedded_calibration_blob() -> Vec<u8> {
+    let packets = builtin_init_packets();
+    let Some(pieces) = packets.get(38..200) else { return Vec::new() };
+    // Strip each piece's 8-byte `[channel][len]` bulk framing and concatenate
+    // the 1110 command's TTP message, then parse it like any message (its own
+    // header sits at offset 8, so stand in 8 zero bytes for the framing).
+    let message: Vec<u8> = pieces.iter().flat_map(|p| p.get(8..).unwrap_or_default().iter().copied()).collect();
+    let prefixed = [&[0u8; 8][..], &message].concat();
+    protocol::parse_message(&prefixed)
+        .and_then(|m| super::calibration::blob_from_payload(m.payload))
+        .map(<[u8]>::to_vec)
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod embedded_blob_tests {
+    #[test]
+    fn embedded_blob_is_present() {
+        let blob = super::embedded_calibration_blob();
+        eprintln!("embedded calibration blob: {} bytes", blob.len());
+        assert!(blob.len() > 100, "embedded blob should be a real calibration, got {}", blob.len());
+    }
+}

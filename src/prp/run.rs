@@ -158,7 +158,9 @@ pub fn run_server(session: Arc<Session>, listener: Listener, props: Arc<Properti
     if let Some(rx) = session.take_streams() {
         let (subs, sink) = (subs.clone(), sink.clone());
         std::thread::spawn(move || {
-            let debug = std::env::var("PRP_DEBUG").is_ok();
+            // Gaze/stream forwarding is high-volume; keep it behind its own flag
+            // so PRP_DEBUG alone shows only command/calibration activity.
+            let debug = std::env::var("PRP_DEBUG_GAZE").is_ok();
             let (mut total, mut gaze_frames, mut fwd) = (0u64, 0u64, 0u64);
             for msg in rx {
                 total += 1;
@@ -411,20 +413,30 @@ fn handle_command(session: &Session, props: &Properties, subs: &Subs, sink: &Sub
         // Calibration clear: the runtime marks calibration active and notifies
         // it before answering. PETM waits for this before showing the points.
         9 => {
+            // PETM's "clear" arrives before the session is open; a device 1060
+            // here is refused (BAD_STATE). The real runtime treats it as a
+            // client-side prepare (tobii-linux tobiid: CALIBRATION_CLEAR =
+            // prepare, no device command). Mark active and acknowledge; the
+            // device's points are cleared by the start macro's own 1060.
             push_notification(sink, prop::CALIBRATION_ACTIVE, PropValue::U32(1));
-            calib(session, tx, command, calcmd::CLEAR, &[0, 0])
+            translate::command_ok(tx, command)
         }
-        // Calibration start: the runtime notifies the (reset) calibration id.
+        // Calibration start: the device needs the full captured session macro,
+        // not 1010 alone — read the active calibration (1100), then 1010 start,
+        // 1060 clear, 1110 write to seed the sample ring. Without the seed the
+        // device refuses every collect with CALIBRATION_NOT_STARTED
+        // (0x20000503). See ttp::calibration and tobii-linux tobiid::seed.
         15 => {
             push_notification(sink, prop::CALIBRATION_ID, PropValue::U32(0));
-            calib(session, tx, command, calcmd::START, &[0, 0])
+            calibration_session_start(session, tx, command)
         }
         11 => {
             let x = f32::from_bits(req.parts.get(1).and_then(|s| s.word(0)).unwrap_or(0));
             let y = f32::from_bits(req.parts.get(1).and_then(|s| s.word(1)).unwrap_or(0));
-            let mut payload = vec![0u8, 0];
-            payload.extend_from_slice(&calibration::collect_payload(x, y, calibration::EYES_BOTH));
-            calib(session, tx, command, calcmd::COLLECT_2D, &payload)
+            eprintln!("calib: COLLECT_2D point ({x:.4}, {y:.4})");
+            // collect_payload already begins with the `00 00` a payload starts
+            // with (TlvWriter); do not prepend another.
+            calib(session, tx, command, calcmd::COLLECT_2D, &calibration::collect_payload(x, y, calibration::EYES_BOTH))
         }
         // Calibration compute and apply: the device computes, then the runtime
         // assigns a new calibration id and notifies it. PETM waits for the id
@@ -452,10 +464,36 @@ fn handle_command(session: &Session, props: &Properties, subs: &Subs, sink: &Sub
 
 /// Run a TTP calibration command and acknowledge the PRP command.
 fn calib(session: &Session, tx: u32, prp_cmd: u32, ttp_cmd: u32, payload: &[u8]) -> Message {
-    if let Err(e) = session.command(ttp_cmd, payload) {
-        eprintln!("prp: calibration TTP command {ttp_cmd} failed: {e}");
-    }
+    ttp_step(session, ttp_cmd, payload);
     translate::command_ok(tx, prp_cmd)
+}
+
+/// PRP calibration start: the full captured device macro that opens a usable
+/// session — read the active calibration (1100), then 1010 start, 1060 clear,
+/// 1110 write to seed the device's sample ring with that calibration. 1010
+/// alone leaves the session in a state that refuses collects.
+fn calibration_session_start(session: &Session, tx: u32, prp_cmd: u32) -> Message {
+    // Seed with the calibration embedded in the init replay: the device holds
+    // no user calibration to read back (a 1100 read is empty), but its sample
+    // ring must be seeded with a valid blob or every collect is refused.
+    let blob = crate::ttp::session::embedded_calibration_blob();
+    eprintln!("calib: start macro (seed blob {} bytes)", blob.len());
+    ttp_step(session, calcmd::START, &[0, 0]);
+    ttp_step(session, calcmd::CLEAR, &[0, 0]);
+    // write_payload already begins with `00 00`; pass it as-is.
+    ttp_step(session, calcmd::WRITE, &calibration::write_payload(&blob));
+    translate::command_ok(tx, prp_cmd)
+}
+
+/// Run one TTP command and log its response error (not the PRP ack).
+fn ttp_step(session: &Session, ttp_cmd: u32, payload: &[u8]) {
+    match session.command(ttp_cmd, payload) {
+        Ok(b) => {
+            let err = parse_message(&b).map(|m| m.error).unwrap_or(0);
+            eprintln!("calib: TTP {ttp_cmd} -> error {err:#010x} ({} B response)", b.len());
+        }
+        Err(e) => eprintln!("prp: calibration TTP command {ttp_cmd} failed: {e}"),
+    }
 }
 
 /// PRP calibration retrieve: read the active calibration (TTP 1100) and return
@@ -464,8 +502,12 @@ fn calibration_retrieve(session: &Session, tx: u32, prp_cmd: u32) -> Message {
     let blob = session
         .command(calcmd::READ, &[0, 0])
         .ok()
-        .and_then(|b| parse_message(&b).and_then(|m| calibration::blob_from_payload(m.payload.get(2..)?).map(<[u8]>::to_vec)))
+        // blob_from_payload skips the leading `00 00` itself (payload_tlvs);
+        // pass the whole payload, as the working embedded-blob read does. The
+        // earlier `get(2..)` skipped it twice and read an empty blob.
+        .and_then(|b| parse_message(&b).and_then(|m| calibration::blob_from_payload(m.payload).map(<[u8]>::to_vec)))
         .unwrap_or_default();
+    eprintln!("calib: RETRIEVE read blob {} bytes", blob.len());
     let mut var = blob;
     while var.len() % 4 != 0 {
         var.push(0);
