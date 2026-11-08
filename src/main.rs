@@ -42,7 +42,13 @@ mod prp;
 mod ttp;
 
 const VID: u16 = 0x2104;
-const PID: u16 = 0x0313;
+/// Eye Tracker 5.
+const PID_ET5: u16 = 0x0313;
+/// Pro Spark (platform IS5LPROENTRY). Same transport family; interface 0 has an
+/// extra bulk OUT 0x04 alongside 0x05/0x83, not used by this bridge.
+const PID_SPARK: u16 = 0x031C;
+/// Known Tobii trackers, tried in order by [`open_device`].
+const KNOWN_PIDS: [u16; 2] = [PID_ET5, PID_SPARK];
 const IFACE: u8 = 0;
 const EP_OUT: u8 = 0x05;
 const EP_IN: u8 = 0x83;
@@ -68,6 +74,42 @@ macro_rules! log {
         let t = $crate::START.get_or_init(std::time::Instant::now).elapsed();
         eprintln!("[{:>8.3}] {}", t.as_secs_f64(), format!($($arg)*));
     }};
+}
+
+/// Optional traffic capture: when `TTPBRIDGE_CAPTURE=<path>` is set, every
+/// per-channel client write to the device (`TX`) and every demultiplexed EP
+/// 0x83 payload from the device (`RX`) is appended as a tab-separated line
+/// `<ms>\t<dir>\t<tag>\tlen=<n>\t<hex>`. This is the raw material for
+/// reconstructing a tracker's init sequence (tobii-linux's
+/// `init_packets_ep.txt` equivalent): TTP messages may span several `TX` lines
+/// on one channel and are reassembled by their length field in post-processing.
+static CAPTURE: std::sync::OnceLock<Option<Mutex<std::fs::File>>> = std::sync::OnceLock::new();
+
+fn capture_init() {
+    let cap = std::env::var("TTPBRIDGE_CAPTURE").ok().and_then(|p| {
+        match std::fs::File::create(&p) {
+            Ok(f) => {
+                log!("capturing channel traffic to {p}");
+                Some(Mutex::new(f))
+            }
+            Err(e) => {
+                log!("cannot open capture file {p}: {e}");
+                None
+            }
+        }
+    });
+    let _ = CAPTURE.set(cap);
+}
+
+fn capture(dir: &str, tag: &str, data: &[u8]) {
+    let Some(Some(file)) = CAPTURE.get() else { return };
+    let t = START.get_or_init(Instant::now).elapsed().as_millis();
+    let mut hex = String::with_capacity(data.len() * 2);
+    for b in data {
+        hex.push_str(&format!("{b:02x}"));
+    }
+    let mut f = file.lock().unwrap();
+    let _ = writeln!(f, "{t}\t{dir}\t{tag}\tlen={}\t{hex}", data.len());
 }
 
 /// A client after its handshake: its connection mode, what it sends and
@@ -96,6 +138,7 @@ fn main() {
         prp_server();
         return;
     }
+    capture_init();
     let mut dir = None;
     let mut name_override = None;
     let mut args = std::env::args().skip(1);
@@ -113,7 +156,7 @@ fn main() {
     let usb = match open_device() {
         Ok(h) => Arc::new(h),
         Err(e) => {
-            log!("cannot open {VID:04x}:{PID:04x}: {e}");
+            log!("cannot open any known Tobii ({VID:04x}): {e}");
             std::process::exit(1);
         }
     };
@@ -167,7 +210,7 @@ fn prp_server() {
     let usb = match open_device() {
         Ok(h) => Arc::new(h),
         Err(e) => {
-            log!("cannot open {VID:04x}:{PID:04x}: {e}");
+            log!("cannot open any known Tobii ({VID:04x}): {e}");
             std::process::exit(1);
         }
     };
@@ -223,7 +266,7 @@ fn ttp_probe() {
     let usb = match open_device() {
         Ok(h) => Arc::new(h),
         Err(e) => {
-            log!("cannot open {VID:04x}:{PID:04x}: {e}");
+            log!("cannot open any known Tobii ({VID:04x}): {e}");
             std::process::exit(1);
         }
     };
@@ -343,11 +386,17 @@ fn dump_keyed(label: &str, payload: &[u8]) {
 }
 
 fn open_device() -> rusb::Result<DeviceHandle<GlobalContext>> {
-    let h = rusb::open_device_with_vid_pid(VID, PID).ok_or(rusb::Error::NoDevice)?;
-    let _ = h.set_auto_detach_kernel_driver(true);
-    let _ = h.set_active_configuration(1);
-    h.claim_interface(IFACE)?;
-    Ok(h)
+    for pid in KNOWN_PIDS {
+        let Some(h) = rusb::open_device_with_vid_pid(VID, pid) else {
+            continue;
+        };
+        let _ = h.set_auto_detach_kernel_driver(true);
+        let _ = h.set_active_configuration(1);
+        h.claim_interface(IFACE)?;
+        log!("opened {VID:04x}:{pid:04x}");
+        return Ok(h);
+    }
+    Err(rusb::Error::NoDevice)
 }
 
 fn serial_number(h: &DeviceHandle<GlobalContext>) -> Option<String> {
@@ -411,6 +460,7 @@ fn usb_read_loop(usb: &Handle, slots: &Slots) {
 }
 
 fn deliver(slots: &Slots, mask: u32, payload: &[u8]) {
+    capture("RX", &format!("mask={mask:#x}"), payload);
     let mut slots = slots.lock().unwrap();
     for ch in 0..CHANNELS {
         if mask & (1 << ch) == 0 {
@@ -486,6 +536,7 @@ fn allocate_channel(b: &Bridge, writer: Writer) -> Option<usize> {
 }
 
 fn send_to_device(b: &Bridge, ch: usize, data: &[u8]) -> rusb::Result<()> {
+    capture("TX", &format!("ch={ch}"), data);
     let _guard = b.out_lock.lock().unwrap();
     for piece in data.chunks(OUT_PIECE_MAX) {
         let mut w = Vec::with_capacity(8 + piece.len());
