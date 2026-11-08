@@ -159,8 +159,10 @@ fn main() {
 }
 
 /// `ttpbridge --prp`: serve the tracker to Pro SDK 2.0 / Eye Tracker Manager
-/// 2.7.2 by translating PRP to TTP. Windows-only for now (macOS PRP transport
-/// is not reversed); the device-facing TTP half runs on any platform.
+/// 2.7.2 by translating PRP to TTP. The transport is named pipes on Windows and
+/// AF_UNIX sockets on macOS (the SDK discovers `/var/run/TOBIIPRP-*`, so run the
+/// bridge with sudo there); the protocol and device-facing TTP halves are the
+/// same on both.
 fn prp_server() {
     let usb = match open_device() {
         Ok(h) => Arc::new(h),
@@ -192,6 +194,8 @@ fn prp_server() {
         Ok(l) => l,
         Err(e) => {
             log!("cannot serve TOBIIPRP-{serial}: {e}");
+            #[cfg(unix)]
+            log!("(the PRP sockets live in /var/run — run the bridge with sudo, or set PRP_SOCKET_DIR)");
             std::process::exit(1);
         }
     };
