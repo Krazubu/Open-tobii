@@ -25,23 +25,28 @@ use super::wire::{self, Message};
 use std::io::{self, Read, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-/// Where the sockets live. The SDK uses `/var/run` for default visibility;
-/// `PRP_SOCKET_DIR` overrides it (e.g. for a relay or a rootless test).
-fn socket_dir() -> PathBuf {
+/// Where the *discovered* command socket lives. The SDK scans
+/// `/var/run/TOBIIPRP-*`, so the command socket must be there (which needs root
+/// to write); `PRP_SOCKET_DIR` overrides it for a relay or a rootless test.
+fn main_dir() -> PathBuf {
     PathBuf::from(std::env::var("PRP_SOCKET_DIR").unwrap_or_else(|_| "/var/run".into()))
 }
 
-fn socket_path(name: &str) -> PathBuf {
-    socket_dir().join(name)
+/// Where the *internal* subscription/time-sync endpoints live. The SDK resolves
+/// a `prp-internal://<name>` endpoint to `/tmp/<name>` (the transport's
+/// "visibility 2"), **not** `/var/run` — confirmed by tracing the SDK opening
+/// `/tmp/<uuid>` for a Spark's endpoints. `PRP_INTERNAL_DIR` overrides it.
+fn internal_dir() -> PathBuf {
+    PathBuf::from(std::env::var("PRP_INTERNAL_DIR").unwrap_or_else(|_| "/tmp".into()))
 }
 
-/// Bind a listening AF_UNIX socket at `/var/run/<name>`, replacing any stale
-/// socket file, and make it connectable by the user's PETM (the bridge runs as
-/// root to write `/var/run`, PETM as the user).
-fn bind_listener(name: &str) -> io::Result<UnixListener> {
-    let path = socket_path(name);
+/// Bind a listening AF_UNIX socket at `<dir>/<name>`, replacing any stale socket
+/// file, and make it connectable by the user's PETM (the bridge may run as root
+/// while PETM runs as the user).
+fn bind_listener(dir: &Path, name: &str) -> io::Result<UnixListener> {
+    let path = dir.join(name);
     // A stale socket file from a previous run makes bind fail with EADDRINUSE.
     let _ = std::fs::remove_file(&path);
     let listener = UnixListener::bind(&path)?;
@@ -155,25 +160,30 @@ impl Listener {
         let main_name = std::env::var("PRP_MAIN_PIPE").unwrap_or_else(|_| format!("TOBIIPRP-{serial}"));
         let sub_name = format!("tobii-et5-bridge-{serial}-sub");
         let ts_name = format!("tobii-et5-bridge-{serial}-ts");
-        let main = bind_listener(&main_name)?;
-        let sub = bind_listener(&sub_name)?;
-        let timesync = bind_listener(&ts_name)?;
+        // The command socket is discovered in /var/run; the internal endpoints
+        // the SDK opens by name live in /tmp.
+        let main = bind_listener(&main_dir(), &main_name)?;
+        let sub = bind_listener(&internal_dir(), &sub_name)?;
+        let timesync = bind_listener(&internal_dir(), &ts_name)?;
         Ok(Listener { main, sub, timesync, main_name, sub_name, ts_name })
     }
 
     pub fn describe(&self) -> String {
-        socket_path(&self.main_name).display().to_string()
+        main_dir().join(&self.main_name).display().to_string()
     }
 
     /// Accept one command connection (its ack names the internal subscription
     /// and time sync endpoints).
     pub fn accept_command(&self) -> io::Result<Channel> {
-        accept_one(&self.main, ChannelKind::Command, &server::command_ack(&self.sub_name, &self.ts_name))
+        // The macOS AF_UNIX runtime answers the command handshake with tag 0,
+        // not Windows's 4 (captured from the official platform runtime).
+        accept_one(&self.main, ChannelKind::Command, &server::command_ack_tagged(0, &self.sub_name, &self.ts_name))
     }
 
     /// Accept one subscription connection; the stream forwarder writes to it.
+    /// The macOS runtime answers with tag 0 (not Windows's 3).
     pub fn accept_sub(&self) -> io::Result<Channel> {
-        accept_one(&self.sub, ChannelKind::Subscription, &server::subscription_ack())
+        accept_one(&self.sub, ChannelKind::Subscription, &server::subscription_ack_tagged(0))
     }
 
     /// Accept one time sync connection.
@@ -184,9 +194,9 @@ impl Listener {
 
 impl Drop for Listener {
     fn drop(&mut self) {
-        for name in [&self.main_name, &self.sub_name, &self.ts_name] {
-            let _ = std::fs::remove_file(socket_path(name));
-        }
+        let _ = std::fs::remove_file(main_dir().join(&self.main_name));
+        let _ = std::fs::remove_file(internal_dir().join(&self.sub_name));
+        let _ = std::fs::remove_file(internal_dir().join(&self.ts_name));
     }
 }
 
@@ -206,6 +216,7 @@ mod tests {
         // Only this test touches these, so the process-wide env is safe here.
         unsafe {
             std::env::set_var("PRP_SOCKET_DIR", &dir);
+            std::env::set_var("PRP_INTERNAL_DIR", &dir);
             std::env::set_var("PRP_MAIN_PIPE", "TESTMAIN");
         }
         let listener = Listener::bind("TESTSERIAL").unwrap();
@@ -229,10 +240,10 @@ mod tests {
         c.read_exact(&mut one).unwrap();
         assert_eq!(u32::from_le_bytes(one), 1);
         c.write_all(&4321u32.to_le_bytes()).unwrap();
-        // Ack rest begins with the endpoint-count word 4; read and sanity-check.
+        // Ack rest begins with the macOS command tag 0; read and sanity-check.
         let mut rest = [0u8; 4];
         c.read_exact(&mut rest).unwrap();
-        assert_eq!(u32::from_le_bytes(rest), 4);
+        assert_eq!(u32::from_le_bytes(rest), 0);
         // Drain the two endpoint strings so the socket buffer is clear.
         let mut endpoints = vec![0u8; 0];
         let mut b = [0u8; 1];

@@ -66,13 +66,20 @@ pub fn parse_client_hello(msg: &[u8]) -> Option<(ChannelKind, String)> {
 }
 
 /// The acknowledgement the server writes on the command connection: `[u32 1]
-/// [u32 4]` then the subscription and time sync endpoints as NUL-terminated
+/// [u32 tag]` then the subscription and time sync endpoints as NUL-terminated
 /// `prp-internal://<uuid>` strings. The client reads these and opens its other
 /// two connections to them.
-pub fn command_ack(sub_uuid: &str, ts_uuid: &str) -> Vec<u8> {
+///
+/// The `tag` word differs by platform's runtime: the Windows named-pipe runtime
+/// sends `4` (see `command_ack_matches_capture`, from `cap-272-main.txt`), but
+/// the macOS AF_UNIX runtime sends `0` — captured from the official
+/// `platform_runtime_*_MAC_x64_service` serving a Spark on 2026-11-08. Sending
+/// Windows's `4` on macOS made the SDK's discovery read it as a failure and
+/// drop the device (0 trackers), so each transport passes its own tag.
+pub fn command_ack_tagged(tag: u32, sub_uuid: &str, ts_uuid: &str) -> Vec<u8> {
     let mut v = Vec::new();
     v.extend_from_slice(&1u32.to_le_bytes());
-    v.extend_from_slice(&4u32.to_le_bytes());
+    v.extend_from_slice(&tag.to_le_bytes());
     v.extend_from_slice(format!("{INTERNAL_PREFIX}{sub_uuid}").as_bytes());
     v.push(0);
     v.extend_from_slice(format!("{INTERNAL_PREFIX}{ts_uuid}").as_bytes());
@@ -80,14 +87,26 @@ pub fn command_ack(sub_uuid: &str, ts_uuid: &str) -> Vec<u8> {
     v
 }
 
-/// The acknowledgement for the subscription connection: `[u32 1][u32 3]
-/// [u16 0]`.
-pub fn subscription_ack() -> Vec<u8> {
+/// The Windows command acknowledgement (tag `4`).
+pub fn command_ack(sub_uuid: &str, ts_uuid: &str) -> Vec<u8> {
+    command_ack_tagged(4, sub_uuid, ts_uuid)
+}
+
+/// The acknowledgement for the subscription connection: `[u32 1][u32 tag]
+/// [u16 0]`. Like the command ack, the `tag` word is runtime-specific: Windows
+/// sends `3`, the macOS AF_UNIX runtime sends `0` (captured from the official
+/// platform runtime on 2026-11-08).
+pub fn subscription_ack_tagged(tag: u32) -> Vec<u8> {
     let mut v = Vec::new();
     v.extend_from_slice(&1u32.to_le_bytes());
-    v.extend_from_slice(&3u32.to_le_bytes());
+    v.extend_from_slice(&tag.to_le_bytes());
     v.extend_from_slice(&0u16.to_le_bytes());
     v
+}
+
+/// The Windows subscription acknowledgement (tag `3`).
+pub fn subscription_ack() -> Vec<u8> {
+    subscription_ack_tagged(3)
 }
 
 /// The acknowledgement for the time sync connection: `[u32 1][u32 0][u16 0]`.
