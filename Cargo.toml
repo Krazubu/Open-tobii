@@ -1,7 +1,8 @@
 [package]
 name = "ttpbridge"
 version = "0.1.0"
-edition = "2021"
+# 2024, as tobii-linux's ported modules use (let chains in src/ttp).
+edition = "2024"
 description = "Makes a Tobii Eye Tracker 5 visible to Tobii Pro Eye Tracker Manager on macOS by serving it the way Tobii's USB service does"
 license = "MIT"
 repository = "https://github.com/Krazubu/tobii-et5-bridge"
@@ -10,6 +11,11 @@ repository = "https://github.com/Krazubu/tobii-et5-bridge"
 # libusb is built from source (vendored), so nothing needs installing.
 rusb = { version = "=0.9.4", features = ["vendored"] }
 libusb1-sys = "=0.7.0"
+# Used by the ported TTP modules (src/ttp, from tobii-linux).
+anyhow = "1"
+tracing = "0.1"
+# For the asynchronous EP 0x83 reader (libusb async transfers + timeval).
+libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [

@@ -34,6 +34,13 @@ mod transport;
 #[path = "transport_windows.rs"]
 mod transport;
 
+// The PRP server (Pro SDK 2.0 / PETM 2.7.2) is being built up; not yet wired
+// into the client dispatch.
+#[allow(dead_code)]
+mod prp;
+#[allow(dead_code)]
+mod ttp;
+
 const VID: u16 = 0x2104;
 const PID: u16 = 0x0313;
 const IFACE: u8 = 0;
@@ -81,6 +88,14 @@ struct Bridge {
 
 fn main() {
     START.get_or_init(Instant::now);
+    if std::env::args().nth(1).as_deref() == Some("ttp-probe") {
+        ttp_probe();
+        return;
+    }
+    if std::env::args().any(|a| a == "--prp") {
+        prp_server();
+        return;
+    }
     let mut dir = None;
     let mut name_override = None;
     let mut args = std::env::args().skip(1);
@@ -141,6 +156,190 @@ fn main() {
             }
         }
     }
+}
+
+/// `ttpbridge --prp`: serve the tracker to Pro SDK 2.0 / Eye Tracker Manager
+/// 2.7.2 by translating PRP to TTP. The transport is named pipes on Windows and
+/// AF_UNIX sockets on macOS (the SDK discovers `/var/run/TOBIIPRP-*`, so run the
+/// bridge with sudo there); the protocol and device-facing TTP halves are the
+/// same on both.
+fn prp_server() {
+    let usb = match open_device() {
+        Ok(h) => Arc::new(h),
+        Err(e) => {
+            log!("cannot open {VID:04x}:{PID:04x}: {e}");
+            std::process::exit(1);
+        }
+    };
+    let serial = serial_number(&usb).unwrap_or_else(|| "UNKNOWN".into());
+    log!("device serial {serial}");
+
+    let session = match ttp::session::Session::open(usb, &ttp::session::builtin_init_packets()) {
+        Ok(s) => Arc::new(s),
+        Err(e) => {
+            log!("TTP session open failed: {e}");
+            std::process::exit(1);
+        }
+    };
+    let props = Arc::new(prp::run::Properties::read_from(&session));
+    log!("device ready: '{}', {} Hz", props.device_name, props.output_frequency);
+    // Start the image stream first, as the Windows Stream Engine, tobii-linux
+    // and `ttp-probe` do: on the ET5 it drives the camera and its IR
+    // illuminators, without which the device tracks no eye — so a calibration
+    // collects only invalid samples and fails. The forwarder ignores these
+    // frames; they are only to keep the tracker's eyes lit.
+    match session.start_stream(ttp::protocol::STREAM_ID_IMAGE) {
+        Ok(()) => log!("image stream 0x50e started (drives the illuminators)"),
+        Err(e) => log!("image stream start failed: {e}"),
+    }
+    // Start the gaze stream now so the device streams continuously; the
+    // forwarder relays it to a client once it subscribes.
+    match session.start_stream(ttp::protocol::STREAM_ID_GAZE) {
+        Ok(()) => log!("gaze stream started"),
+        Err(e) => log!("gaze stream start failed: {e}"),
+    }
+
+    let listener = match prp::transport::Listener::bind(&serial) {
+        Ok(l) => l,
+        Err(e) => {
+            log!("cannot serve TOBIIPRP-{serial}: {e}");
+            #[cfg(unix)]
+            log!("(the PRP sockets live in /var/run — run the bridge with sudo, or set PRP_SOCKET_DIR)");
+            std::process::exit(1);
+        }
+    };
+    log!("listening on {} (clients see tobii-prp://{serial})", listener.describe());
+
+    if let Err(e) = prp::run::run_server(session, listener, props) {
+        log!("prp server stopped: {e}");
+        std::process::exit(1);
+    }
+}
+
+/// `ttpbridge ttp-probe`: bring the device up over TTP ourselves (no SDK) and
+/// issue a few read commands, printing what comes back. The local bench for
+/// the PRP translator's device-facing half.
+fn ttp_probe() {
+    let usb = match open_device() {
+        Ok(h) => Arc::new(h),
+        Err(e) => {
+            log!("cannot open {VID:04x}:{PID:04x}: {e}");
+            std::process::exit(1);
+        }
+    };
+    log!("serial {}", serial_number(&usb).unwrap_or_default());
+    let session = match ttp::session::Session::open(usb, &ttp::session::builtin_init_packets()) {
+        Ok(s) => s,
+        Err(e) => {
+            log!("session open failed: {e}");
+            std::process::exit(1);
+        }
+    };
+    log!("session up; init replayed");
+
+    use ttp::protocol::{cmd, parse_message};
+    let streams = session.take_streams();
+    for (name, command, payload) in [
+        ("DEVICE_STRINGS 1420", cmd::DEVICE_STRINGS, vec![0u8, 0]),
+        ("DISPLAY_AREA_GET 1430", cmd::DISPLAY_AREA_GET, vec![0u8, 0]),
+        ("TRACK_BOX 1400", cmd::TRACK_BOX, vec![0u8, 0]),
+        ("OUTPUT_RATE 1650", cmd::OUTPUT_RATE, vec![0u8, 0]),
+        ("STATUS 1490", cmd::STATUS, vec![0u8, 0]),
+    ] {
+        match session.command(command, &payload) {
+            Ok(bytes) => {
+                let m = parse_message(&bytes);
+                let (err, plen) = m.map(|m| (m.error, m.payload.len())).unwrap_or((0, 0));
+                let body = m.map(|m| m.payload).unwrap_or(&[]);
+                let strings: Vec<String> = body
+                    .split(|&b| b == 0)
+                    .filter(|s| s.len() >= 3 && s.iter().all(|&c| (0x20..0x7f).contains(&c)))
+                    .map(|s| String::from_utf8_lossy(s).into_owned())
+                    .collect();
+                log!("{name}: error {err:#x}, {plen} B payload{}", if strings.is_empty() { String::new() } else { format!(", strings {strings:?}") });
+            }
+            Err(e) => log!("{name}: {e}"),
+        }
+    }
+    // Start the gaze stream and watch it for several seconds: does the device
+    // stream 0x500 continuously with our driving?
+    // Start the image stream 0x50e first, as the Windows Stream Engine and
+    // tobii-linux do: on the ET5 this appears to drive the camera and its IR
+    // illuminators, without which no eye can be tracked (all gaze sentinel).
+    match session.start_stream(ttp::protocol::STREAM_ID_IMAGE) {
+        Ok(()) => log!("image stream 0x50e started"),
+        Err(e) => log!("image stream 0x50e start failed: {e}"),
+    }
+    let _ = session.start_stream(ttp::protocol::STREAM_ID_GAZE);
+    let _ = session.start_stream(ttp::protocol::STREAM_ID_PRESENCE);
+    let Some(rx) = streams else { return };
+    let start = Instant::now();
+    let (mut gaze, mut other, mut valid) = (0u64, 0u64, 0u64);
+    let mut by_id: std::collections::BTreeMap<u32, u64> = std::collections::BTreeMap::new();
+    let (mut gaze_dumped, mut pres_dumped) = (0u32, 0u32);
+    log!(">>> WATCH THE TRACKER NOW: do the red LEDs light up? (20s) <<<");
+    while start.elapsed() < Duration::from_secs(20) {
+        match rx.recv_timeout(Duration::from_millis(500)) {
+            Ok(msg) => {
+                let Some(m) = parse_message(&msg) else { continue };
+                *by_id.entry(m.id).or_default() += 1;
+                if m.id == ttp::protocol::STREAM_ID_GAZE {
+                    gaze += 1;
+                    if let Some(g) = ttp::gaze83::decode_gaze_frame(&m) {
+                        // Count frames where the device actually tracked an eye.
+                        if g.left.gaze_point_norm.valid || g.right.gaze_point_norm.valid || g.left.pupil_diameter_mm.valid {
+                            valid += 1;
+                        }
+                    }
+                    // Dump the raw keyed fields of the first few gaze frames so
+                    // we can see what the device actually reports (validity keys,
+                    // pupil status) rather than trust the decoder's summary.
+                    if gaze_dumped < 3 {
+                        gaze_dumped += 1;
+                        dump_keyed("gaze 0x500", m.payload);
+                    }
+                } else {
+                    other += 1;
+                    if m.id == ttp::protocol::STREAM_ID_PRESENCE && pres_dumped < 2 {
+                        pres_dumped += 1;
+                        dump_keyed("presence 0x504", m.payload);
+                    }
+                }
+            }
+            Err(_) => {}
+        }
+    }
+    let secs = start.elapsed().as_secs_f64();
+    log!("over {secs:.1}s: {gaze} gaze = {:.1}/s, {valid} VALID (eye tracked), {other} other", gaze as f64 / secs);
+    log!("by stream id: {by_id:?}");
+}
+
+/// Dump a stream message's keyed fields: every scalar key present (as hex
+/// bits, plus its 16.16 value), points marked, and the raw payload hex. Lets
+/// us read the device's own validity/status words directly.
+fn dump_keyed(label: &str, payload: &[u8]) {
+    use ttp::tlv::{KeyedValue, keyed_fields};
+    let f = keyed_fields(payload);
+    let mut scalars = Vec::new();
+    let mut points = Vec::new();
+    for k in 0u32..0x30 {
+        match f.get(k) {
+            Some(KeyedValue::Scalar { typ, bits }) => {
+                let fx = f.fixed16(k).map(|v| format!("={v:.3}")).unwrap_or_default();
+                scalars.push(format!("{k:#04x}:t{typ}={bits:#x}{fx}"));
+            }
+            Some(KeyedValue::Point { id, raw, len }) => {
+                points.push(format!("{k:#04x}:pt{id:#x}[{}]{:?}", len, &raw[..len.min(3)]));
+            }
+            None => {}
+        }
+    }
+    log!("{label} ({} B): scalars {}", payload.len(), scalars.join(" "));
+    if !points.is_empty() {
+        log!("{label} points: {}", points.join(" "));
+    }
+    let hex: String = payload.iter().take(160).map(|b| format!("{b:02x}")).collect();
+    log!("{label} hex[..160]: {hex}");
 }
 
 fn open_device() -> rusb::Result<DeviceHandle<GlobalContext>> {
