@@ -14,8 +14,16 @@ tobii-calib.workspace = true
 tobii-ipc.workspace = true
 tobii-log.workspace = true
 tobii-proto.workspace = true
-tobii-usb.workspace = true
+tobii-usb = { workspace = true, default-features = false }
 tracing.workspace = true
+
+[features]
+# Head-pose inference from the IR image stream (ONNX Runtime, via tobii-usb's
+# `head-pose`). On by default. Turn it off (`--no-default-features`) for a
+# gaze-only daemon on targets where ONNX Runtime ships no prebuilt binary, such
+# as x86_64 macOS.
+default = ["head-pose"]
+head-pose = ["tobii-usb/head-pose"]
 
 [lints]
 workspace = true

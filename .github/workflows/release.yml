@@ -1,11 +1,18 @@
-# The release packages: on a v* tag, built (`make package`, in the container
-# of packaging/Containerfile) and published as that tag's GitHub release; run
-# by hand, built and kept as the run's artifacts.
+# Release binaries: on a v* tag, build for every supported OS/arch and publish
+# them all as that tag's GitHub release; run by hand (workflow_dispatch) it
+# builds and keeps the archives as the run's artifacts without publishing.
 #
-# Two jobs, because the build runs code from many crates' build scripts and
-# the onnxruntime it downloads: its job may only read the repository, and the
-# one job that may write runs nothing of the tree, only takes the files the
-# build made and publishes them.
+#   * linux   — the packages (`make package`, in packaging/Containerfile)
+#   * macos   — tobiid + tobii-calibrate for Apple Silicon and Intel 64-bit
+#   * android — the proof-of-concept APK (arm64-v8a + armeabi-v7a)
+#
+# Windows is not built here: this project has no Windows support (the Windows
+# binaries are tobii-et5-bridge's). macOS 32-bit (i686-apple-darwin) is a tier-3
+# target needing a nightly toolchain and the 10.14 SDK, so it is built by hand
+# from the macos-i386 branch, not here.
+#
+# The publish job runs nothing from the tree: it only takes the files the build
+# jobs made and attaches them to the release.
 name: release
 
 on:
@@ -13,8 +20,11 @@ on:
     tags: ["v*"]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
-  build:
+  linux:
     runs-on: ubuntu-24.04
     # A clean build takes minutes; past this, something hangs.
     timeout-minutes: 60
@@ -44,18 +54,128 @@ jobs:
           path: dist/
           if-no-files-found: error
 
+  macos:
+    name: macos ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ONNX Runtime (head pose) ships no prebuilt for x86_64 macOS, so the
+          # Intel build is gaze-only; Apple Silicon keeps head pose.
+          - { name: arm64, target: aarch64-apple-darwin, extra: "" }
+          - { name: x64,   target: x86_64-apple-darwin,  extra: "--no-default-features" }
+    runs-on: macos-14
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Add the target
+        run: rustup target add ${{ matrix.target }}
+
+      # The daemon and the calibration tool are what runs on macOS; the Linux
+      # desktop integrations (tobii-opentrack, tobii-gaze-keys) are not built
+      # here. head-pose/ONNX is on by default and downloads its macOS runtime.
+      - name: Build tobiid and tobii-calibrate
+        run: cargo build --release --locked --target ${{ matrix.target }} ${{ matrix.extra }} -p tobiid -p tobii-calibrate
+
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="tobii-linux-${GITHUB_REF_NAME}-macos-${{ matrix.name }}"
+          mkdir "$out"
+          cp "target/${{ matrix.target }}/release/tobiid" "$out/"
+          cp "target/${{ matrix.target }}/release/tobii-calibrate" "$out/"
+          cp README.md LICENSE "$out/" 2>/dev/null || true
+          tar czf "$out.tar.gz" "$out"
+
+      - name: Keep the archive
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: tobii-linux-macos-${{ matrix.name }}
+          path: tobii-linux-*-macos-${{ matrix.name }}.tar.gz
+          if-no-files-found: error
+
+  android:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Add the Android Rust targets
+        run: rustup target add aarch64-linux-android armv7-linux-androideabi
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: Install the NDK the project pins
+        run: |
+          set -euo pipefail
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;25.1.8937393"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/25.1.8937393" >> "$GITHUB_ENV"
+
+      # cargo-ndk's -o writes each ABI's libtobii_android.so straight into
+      # app/src/main/jniLibs/<abi>/, where the Android Gradle Plugin finds it.
+      - name: Build the native library (arm64 + arm32)
+        run: >
+          cargo ndk
+          -t arm64-v8a -t armeabi-v7a
+          -o android/app/src/main/jniLibs
+          build -p tobii-android --release
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.10.2"
+
+      - name: Build the APK
+        working-directory: android
+        run: gradle assembleDebug --no-daemon
+
+      - name: Name the APK after the tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk=$(find android/app/build/outputs/apk -name '*.apk' | head -n1)
+          cp "$apk" "tobii-android-${GITHUB_REF_NAME}.apk"
+
+      - name: Keep the APK
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: tobii-android-apk
+          path: tobii-android-*.apk
+          if-no-files-found: error
+
   publish:
-    needs: build
-    if: github.ref_type == 'tag'
+    needs: [linux, macos, android]
+    # Publish whatever built: a target that fails does not sink the release;
+    # its binaries can be added later with `gh release upload`.
+    if: always() && github.ref_type == 'tag'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      - name: Gather every build's files
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: tobii-linux-packages
-          path: dist/
+          path: dist
+          merge-multiple: true
 
       - name: Publish the release
         env:
