@@ -20,6 +20,7 @@
 pub mod calibration;
 pub mod device;
 pub mod engine;
+pub mod models;
 #[cfg(feature = "head-pose")]
 mod pose;
 #[cfg(not(feature = "head-pose"))]
