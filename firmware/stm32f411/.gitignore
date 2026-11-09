@@ -1,0 +1,9 @@
+# Generated from crates/tobii-usb/init_packets_ep.txt by tools/gen_init_packets.py
+/include/tobii_init.h
+# Build artifacts
+/build/
+*.o
+*.elf
+*.bin
+*.hex
+*.map
