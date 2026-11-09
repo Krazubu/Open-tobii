@@ -7,3 +7,6 @@
 *.bin
 *.hex
 *.map
+firmware/stm32f411/bringup/oled_demo.elf
+firmware/stm32f411/bringup/oled_demo.bin
+firmware/stm32f411/bringup/oled_demo.map
