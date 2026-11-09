@@ -502,9 +502,8 @@ fn tobii_address(ctx: &UsbContext) -> Option<BusAddress> {
         .ok()?
         .iter()
         .find(|d| {
-            d.device_descriptor().is_ok_and(|x| {
-                crate::models::recognise(x.vendor_id(), x.product_id()).is_some()
-            })
+            d.device_descriptor()
+                .is_ok_and(|x| crate::models::recognise(x.vendor_id(), x.product_id()).is_some())
         })
         .map(|d| BusAddress {
             bus: d.bus_number(),

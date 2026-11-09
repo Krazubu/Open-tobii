@@ -391,7 +391,11 @@ impl Ui {
         // macOS's borderless fullscreen leaves the menu bar's height
         // uncovered, and winit does not always report the Fullscreen state
         // there either.
-        let threshold = if cfg!(target_os = "macos") { 0.95 } else { 0.98 };
+        let threshold = if cfg!(target_os = "macos") {
+            0.95
+        } else {
+            0.98
+        };
         let covers = |w: u32, h: u32| {
             f64::from(size.width) >= f64::from(w) * threshold
                 && f64::from(size.height) >= f64::from(h) * threshold

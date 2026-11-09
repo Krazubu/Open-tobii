@@ -16,7 +16,7 @@ use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use tobii_ipc::deadline::{CALIBRATION_QUICK as QUICK, CALIBRATION_SLOW as SLOW};
-use tobii_proto::calibration::{EYES_BOTH, collect_payload, cmd, write_payload};
+use tobii_proto::calibration::{EYES_BOTH, cmd, collect_payload, write_payload};
 use tobii_proto::protocol::{RESPONSE_STATUS_OK, ttp_error};
 use tobii_usb::engine::{Commands, DeviceCommand};
 
@@ -37,9 +37,18 @@ fn session_slot() -> &'static Mutex<Option<Session>> {
 /// Run `cmd` and reduce its outcome to the payload or a one-line reason: an
 /// answer succeeds only with the OK status and no TTP error, same test as
 /// the daemon's own `run` (`tobiid::device::run`).
-fn run(commands: &Commands, cmd: u32, payload: Vec<u8>, timeout: Duration) -> Result<Vec<u8>, String> {
+fn run(
+    commands: &Commands,
+    cmd: u32,
+    payload: Vec<u8>,
+    timeout: Duration,
+) -> Result<Vec<u8>, String> {
     let response = commands
-        .run(DeviceCommand { cmd, payload, timeout })
+        .run(DeviceCommand {
+            cmd,
+            payload,
+            timeout,
+        })
         .map_err(|e| format!("command {cmd}: {e}"))?;
     if response.status == RESPONSE_STATUS_OK && response.error == ttp_error::NONE {
         Ok(response.payload)
@@ -79,7 +88,12 @@ pub(crate) fn start(commands: &Commands, storage_dir: &str) -> Result<(), String
 
 /// Collects one point (1030), normalised display coordinates, both eyes.
 pub(crate) fn collect(commands: &Commands, x: f32, y: f32) -> Result<(), String> {
-    run(commands, cmd::COLLECT_2D, collect_payload(x, y, EYES_BOTH), QUICK)?;
+    run(
+        commands,
+        cmd::COLLECT_2D,
+        collect_payload(x, y, EYES_BOTH),
+        QUICK,
+    )?;
     Ok(())
 }
 
@@ -91,7 +105,8 @@ pub(crate) fn compute(commands: &Commands) -> Result<u32, String> {
     let blob = tobii_proto::calibration::blob_from_payload(&payload)
         .ok_or("compute: no blob in the read-back")?
         .to_vec();
-    let info = tobii_calib::blob::validate(&blob).map_err(|e| format!("computed calibration: {e}"))?;
+    let info =
+        tobii_calib::blob::validate(&blob).map_err(|e| format!("computed calibration: {e}"))?;
     let mut guard = session_slot().lock().unwrap();
     let session = guard.as_mut().ok_or("compute: no session running")?;
     session.computed = Some(blob);
@@ -107,7 +122,11 @@ pub(crate) fn stop(commands: &Commands, keep: bool) -> Result<bool, String> {
         path,
         previous,
         computed,
-    } = session_slot().lock().unwrap().take().ok_or("stop: no session running")?;
+    } = session_slot()
+        .lock()
+        .unwrap()
+        .take()
+        .ok_or("stop: no session running")?;
     let kept = keep.then_some(computed).flatten();
     let active = kept.as_ref().unwrap_or(&previous);
     run(commands, cmd::STOP, Vec::new(), QUICK)?;

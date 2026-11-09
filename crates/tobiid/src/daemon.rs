@@ -1500,8 +1500,7 @@ fn has_peer_hung_up(id: u64, stream: &UnixStream) -> bool {
         // the call does not block.
         let ready = unsafe { libc::poll(&raw mut fd, 1, 0) };
         if ready >= 0 {
-            return ready > 0
-                && fd.revents & (POLLRDHUP | libc::POLLHUP | libc::POLLERR) != 0;
+            return ready > 0 && fd.revents & (POLLRDHUP | libc::POLLHUP | libc::POLLERR) != 0;
         }
         let e = io::Error::last_os_error();
         if e.kind() != io::ErrorKind::Interrupted {
