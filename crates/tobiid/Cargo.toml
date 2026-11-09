@@ -25,5 +25,8 @@ tracing.workspace = true
 default = ["head-pose"]
 head-pose = ["tobii-usb/head-pose"]
 
+[dev-dependencies]
+tobii-calib = { workspace = true, features = ["testing"] }
+
 [lints]
 workspace = true

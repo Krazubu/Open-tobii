@@ -13,7 +13,7 @@ A Linux driver stack for the **Tobii Eye Tracker 5** (USB `2104:0313`), built
 by reverse-engineering the device's USB protocol. It gives you gaze, user
 presence and gaze-independent 6-DOF head pose — all at 33 Hz, all at the same
 time — plus calibration, through a daemon, a drop-in `libtobii.so` for Tobii's
-Stream Engine 4.1 C API, and a few thin clients.
+Stream Engine 4.25 C API, and a few thin clients.
 
 Tobii ships no Linux support for this device. Everything here was recovered
 from USB captures of the Windows Stream Engine.
@@ -28,6 +28,11 @@ from USB captures of the Windows Stream Engine.
 sudo dnf install ./open-tobii-*.x86_64.rpm   # or: sudo apt install ./open-tobii_*_amd64.deb
 tobii-calibrate                               # calibrate once; it starts the daemon itself
 ```
+
+Calibrating is once per user, and it is what puts gaze where you look:
+games and applications reading gaze through `libtobii.so` need it, and so
+does gaze-switcher. Head pose (OpenTrack) and `tobii-gaze-keys`' arrows work
+without it. Until you calibrate, a notification at login offers it.
 
 Gaze to arrow keys and head pose to OpenTrack are opt-in, one `systemctl
 --user enable` each — [INSTALL.md §3](INSTALL.md) says what each one needs
@@ -101,11 +106,18 @@ distribution with systemd and glibc 2.35 or newer (INSTALL.md §0). They install
 daemon, `libtobii.so` and its headers, the clients, the udev rules and the
 user units, and put "Tobii Calibration" among the desktop's applications.
 
+The packages are x86_64 only; the driver is not. On another architecture,
+build it from source (below) — **aarch64 runs it**, confirmed on a Raspberry
+Pi 4 under Ubuntu Server 24.04
+([#2](https://github.com/Skyggedans/tobii-linux/issues/2), thanks Krazubu),
+where the ONNX Runtime the head pose links against downloads an aarch64
+build of its own.
+
 From source:
 
 ```bash
 cargo build --release --workspace     # or: make build
-make install                          # binaries + libtobii.so + headers + udev rules + desktop entry + user units
+make install                          # binaries + libtobii.so + headers + udev rules + desktop entries + user units
 make enable                           # start the daemon now
 tobii-calibrate                       # calibrate for your eyes (once)
 ```
@@ -131,12 +143,15 @@ while you play (`enable --now` for every login), and
 the same 199 functions as `tobii_stream_engine.dll` 4.25.0.3, with the DLL's
 signatures (`tools/abi/dll_abi.py headers` checks every prototype), error
 codes, enum values and struct layouts (the size of `tobii_stream_type_t` is
-inferred, and what the fields of `tobii_hardware_configuration_t` hold is
-provisional, as the headers say), so a program written for Stream Engine
-4.1 builds against its headers and runs unchanged; Architecture says what
-each function does with an ET5. OpenTrack's own Tobii tracker, the
-`tracker-tobii` plugin, is one once it is brought to Stream Engine 4: built
-on Linux from the `tracker-tobii-linux` branch of the
+inferred, `tobii_hardware_configuration_t` keeps 4.1.0.3's two-entry layout,
+and what its fields hold is provisional, as the headers say), so a program
+written for Stream Engine 4.1 builds against its headers and runs unchanged
+unless it calls the undocumented `tobii_multiple_faces_position_subscribe`
+or `_unsubscribe`, which 4.25 renamed `tobii_multiple_faces_subscribe` and
+`_unsubscribe`; Architecture says what each function does with an ET5.
+OpenTrack's own Tobii tracker, the `tracker-tobii` plugin, is one once it is
+brought to Stream Engine 4: built on Linux from the `tracker-tobii-linux`
+branch of the
 [OpenTrack fork](https://github.com/Skyggedans/opentrack/tree/tracker-tobii-linux),
 it reads the head pose through libtobii, with no UDP bridge. The fork lets
 the plugin build on Linux and against Stream Engine 4, reconnect after a
@@ -146,9 +161,9 @@ daemon restart and hold its last pose while the face is lost (INSTALL.md
 Full instructions, tuning knobs and troubleshooting are in
 **[INSTALL.md](INSTALL.md)**.
 
-Requirements: a stable Rust toolchain, libusb, and the tracker plugged in. The
-face models and the init capture are embedded at build time, so the installed
-binaries need no runtime data files.
+Requirements: a stable Rust toolchain, libusb, and the tracker plugged in, on
+x86_64 or aarch64. The face models and the init capture are embedded at build
+time, so the installed binaries need no runtime data files.
 
 ## Architecture
 
@@ -165,21 +180,27 @@ tobii-calibrate ─┘                      │
 so several consumers can read gaze and head pose at once.
 
 `libtobii.so` exports **all 199 entry points** of Tobii's
-`tobii_stream_engine.dll` 4.25.0.3, and no others, with its signatures, errornumbering and struct layouts — so any Stream Engine client links and runs. The
-ABI was recovered from the DLL itself (`tools/abi/`) and the archived 4.1.0
-reference. Three struct layouts follow the DLLs rather than that reference:
+`tobii_stream_engine.dll` 4.25.0.3, and no others, with its signatures, error
+numbering and struct layouts but one (`tobii_hardware_configuration_t` keeps
+4.1.0.3's two entries and 2472 bytes, where 4.25.0.3's holds four and is
+inferred to be 3960) — so any Stream Engine client links and runs. The ABI
+was recovered from the two DLLs themselves — 4.1.0.3's in `tools/abi/`, what
+4.25.0.3 adds or changes in the comments of `crates/tobii-ffi/` (`src/` and
+`include/tobii/`) — and the archived 4.1.0 reference. Three struct layouts
+follow the DLLs rather than that reference:
 `tobii_gaze_data_eye_t` carries a fifth validity the 4.1 documentation omits
 (80 bytes per eye, not 76), `tobii_gaze_raw_t` is 4.25's 248-byte record
 instead of 4.1's 232, and `tobii_wearable_advanced_data_t` is 4.25's 216-byte
 one instead of 4.1's 208 — the changelog says why.
 
 Of those 199: most are served by the daemon from the tracker's own data, some
-are answered locally because the Stream Engine answers them locally too, and
+are answered locally because the Stream Engine answers them locally too,
 **five of the 4.1 surface remain unimplemented refusals** — reading and
-listing the illumination
-modes, arming and disarming remote wake (the tracker refuses all four itself,
-so the answer is right) and the configuration key, which needs a realm no
-entry point can open.
+listing the illumination modes, arming and disarming remote wake (the tracker
+refuses all four itself, so the answer is right) and the configuration key,
+which needs a realm no entry point can open — and twenty-nine of the
+forty-six entry points 4.25 adds are refusals too (Limitations says which,
+and why).
 
 Where an answer cannot be the Stream Engine's it diverges deliberately: the
 combined-gaze HID track box is the tracker's measured one rather than the
@@ -187,9 +208,12 @@ constants the DLL holds, both custom-command payloads are bounded where the
 DLL bounds neither, seven entry points keep the DLL's licence refusal, and
 seven of the thirteen notification types are delivered.
 
-**[docs/stream-engine-api.md](docs/stream-engine-api.md) says what every entry
-point answers and why**, divergence by divergence; `tools/abi/README.md`
-carries the derivation with the DLL addresses each claim was read at.
+**[docs/stream-engine-api.md](docs/stream-engine-api.md) says what the entry
+points answer and why**, by name or by family, divergence by divergence, the
+48 names 4.25 added included. `tools/abi/README.md` carries 4.1.0.3's
+derivation, with the DLL addresses each claim was read at, and the comments in
+`crates/tobii-ffi/` (`src/` and `include/tobii/`) carry that of what 4.25.0.3
+adds or changes, with the DLL addresses where they give them.
 
 The headers are in `crates/tobii-ffi/include/tobii/` (installed to
 `/usr/include/tobii/` by the packages, `/usr/local/include/tobii/` by `make
@@ -267,11 +291,19 @@ tools/headpose/truth.py --session LOG JSONL FITS ...         # yaw and pitch vs 
   the frame, `libtobii.so` marks its head pose invalid, as the Stream Engine
   does; `tobii-opentrack` then sends nothing, and OpenTrack holds the last
   pose.
-- Until you run `tobii-calibrate`, the calibration in use is the one embedded
-  in `init_packets_ep.txt` — the author's. Likewise the display area is the
-  author's 27" monitor until you set yours: `tobii-calibrate` does it first
-  (you line two ticks up with the marks on the tracker), and the daemon keeps
-  whatever display area is set (`~/.config/tobii/display-area`).
+- Until you run `tobii-calibrate`, the calibration in use is the tracker's
+  own power-up default (id 0), which `init_packets_ep.txt` uploads: coarse,
+  made for no one in particular, so gaze lands roughly. The display area is
+  the one that capture carries, 633.6 × 334.3 mm (a 28.2" screen, wider than
+  16:9), whatever your monitor is. The tracker scales gaze to that area, so
+  on any other screen gaze misses the edges: looking at the left and right
+  edges of a 24" 16:9 monitor reads about 0.08 and 0.92, of a 49" 32:9 one
+  about −0.44 and 1.44. `tobii-calibrate` sets your area first (you line two
+  ticks up with the marks on the tracker), and the daemon keeps whatever
+  display area is set (`~/.config/tobii/display-area`). A calibration made
+  with `--no-display-setup`, or before 0.4.1 (whose display setup never
+  succeeded), was made on whatever area the tracker had, usually the
+  capture's: calibrate again.
 - **Only the Eye Tracker 5** (`2104:0313`). A 5L, 4C or anything else answers
   a different stream catalogue and a different generation, and none has been
   seen; see [CONTRIBUTING.md](CONTRIBUTING.md) for what a capture of one would
@@ -281,19 +313,23 @@ tools/headpose/truth.py --session LOG JSONL FITS ...         # yaw and pitch vs 
   which `TOBII_ERROR_NOT_SUPPORTED` is nevertheless the right answer, the
   tracker refusing all four itself — and the configuration key, which needs a
   realm no entry point can open.
-- **Thirty of the forty-six entry points 4.25 adds are refusals too**, and for
-  the same reason: they are streams and properties the DLL itself serves only
-  behind the Tobii service, for hardware an Eye Tracker 5 is not — the
-  wearable and camera-image streams, the facial landmarks, the device log, the
-  algorithm-debug stream, the remote cameras, the extended lens
-  configuration, the ambient light level (whose handler in 4.25 is a stub
-  returning `TOBII_ERROR_NOT_SUPPORTED` as well), proximity data collection
-  and the two algo-box commands. Each checks its arguments and answers as the
-  DLL does, and none invents data. The other sixteen are real: the fault and
-  warning lists and their streams, the output-frequency stream, the responsive
-  gaze point, 4.25's presence stream, and the four signing calls, which need
-  no device at all.
-  [docs/stream-engine-api.md](docs/stream-engine-api.md) has the rest.
+- **Twenty-nine of the forty-six entry points 4.25 adds are refusals too**:
+  streams, properties and commands the DLL itself serves only behind the
+  Tobii service, for hardware an Eye Tracker 5 is not, or, for absolute eye
+  openness, gates on a licence a consumer tracker lacks — the wearable and
+  camera-image streams, the facial landmarks, the device log, absolute eye
+  openness, the algorithm-debug stream, the remote cameras, reading and
+  writing the extended lens configuration, the ambient light level (whose
+  handler in 4.25's own tracker module is a stub that refuses it too),
+  proximity data collection, `tobii_force_frame_sequence` and
+  `tobii_set_algo_box_mode`. Each checks its arguments, and none invents data.
+  The other seventeen give real answers: the fault and warning lists and their
+  streams, 4.25's presence stream, the responsive gaze point (the tracker's
+  own unfiltered point, key `0x20`), the output-frequency stream, whether the
+  extended lens configuration can be written (never), and the four signing
+  calls, which need no device at all.
+  [docs/stream-engine-api.md](docs/stream-engine-api.md#what-425-added) says
+  what each answers and where that differs from the DLL.
 - The calibration sequence mirrors the one captured from Windows; 3-D and
   per-eye calibration are not supported, as the Stream Engine answers for
   an ET5 (per-eye calls check their own arguments first, as 4.25 does, and

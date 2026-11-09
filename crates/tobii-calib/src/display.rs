@@ -3,9 +3,11 @@
 //! The Stream Engine keeps a display area set through
 //! `tobii_set_display_area` across sessions, so the daemon does too: every
 //! area a client sets and the device accepts is written to
-//! `display-area` in the per-user Tobii directory, and loaded at start as the
-//! area the init replay configures (instead of the capture author's
-//! monitor). `TOBII_DISPLAY_MM` only applies while nothing is saved.
+//! [`FILE_NAME`] in the per-user Tobii directory, and loaded at start as the
+//! area the init replay configures (instead of the Windows capture's,
+//! 633.6 x 334.3 mm). `TOBII_DISPLAY_MM` only applies while nothing is saved.
+//! It lives here, beside the calibration's store, for the clients that read
+//! it too.
 //!
 //! The file is text, three corners in millimetres in the tracker's frame:
 //!
@@ -23,16 +25,25 @@ use std::path::{Path, PathBuf};
 use tobii_ipc::geometry::DisplayArea;
 
 /// File name in the per-user Tobii directory.
-const FILE_NAME: &str = "display-area";
+pub const FILE_NAME: &str = "display-area";
 
-/// Where the display area is saved, if there is a per-user directory.
-pub(crate) fn default_path() -> Option<PathBuf> {
-    tobii_calib::store::config_dir().map(|dir| dir.join(FILE_NAME))
+/// The size (width, height) of the display area the init replay configures
+/// while none is saved, to 0.1 mm: the Windows capture's, a 28.2" screen
+/// wider than 16:9, and no monitor of the user's. `tobii-usb` checks it
+/// against the replay.
+pub const BUILT_IN_MM: (f64, f64) = (633.6, 334.3);
+
+/// Where the display area is saved, if there is a per-user directory (see
+/// [`crate::store::config_dir`]).
+#[must_use]
+pub fn default_path() -> Option<PathBuf> {
+    crate::store::config_dir().map(|dir| dir.join(FILE_NAME))
 }
 
 /// The file's text for `area`. Values print in their shortest exact form, so
 /// they read back identical.
-pub(crate) fn to_text(area: &DisplayArea) -> String {
+#[must_use]
+pub fn to_text(area: &DisplayArea) -> String {
     let mut s = String::from(
         "# The monitor the eye tracker is mounted on: corners in mm, tracker frame.\n\
          # Written by tobiid whenever a display area is set.\n",
@@ -49,7 +60,8 @@ pub(crate) fn to_text(area: &DisplayArea) -> String {
 
 /// Parse the file's text: each corner exactly once, finite, and a display
 /// with a width and a height.
-pub(crate) fn from_text(text: &str) -> Option<DisplayArea> {
+#[must_use]
+pub fn from_text(text: &str) -> Option<DisplayArea> {
     let (mut tl, mut tr, mut bl) = (None, None, None);
     for line in text.lines().map(str::trim) {
         if line.is_empty() || line.starts_with('#') {
@@ -85,12 +97,23 @@ pub(crate) fn from_text(text: &str) -> Option<DisplayArea> {
         .then_some(area)
 }
 
+/// The display's width and height in mm: the lengths of its top and left
+/// edges.
+#[must_use]
+pub fn size_mm(area: &DisplayArea) -> (f64, f64) {
+    let span = |a: [f64; 3], b: [f64; 3]| (0..3).map(|i| (a[i] - b[i]).powi(2)).sum::<f64>().sqrt();
+    (
+        span(area.top_left_mm, area.top_right_mm),
+        span(area.top_left_mm, area.bottom_left_mm),
+    )
+}
+
 /// Read the area saved at `path`; `Ok(None)` when there is none.
 ///
 /// # Errors
 ///
 /// When the file exists but cannot be read, or does not hold a display area.
-pub(crate) fn load(path: &Path) -> io::Result<Option<DisplayArea>> {
+pub fn load(path: &Path) -> io::Result<Option<DisplayArea>> {
     let text = match fs::read_to_string(path) {
         Ok(t) => t,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -109,8 +132,8 @@ pub(crate) fn load(path: &Path) -> io::Result<Option<DisplayArea>> {
 /// # Errors
 ///
 /// When the directory or file cannot be written.
-pub(crate) fn save(path: &Path, area: &DisplayArea) -> io::Result<()> {
-    tobii_calib::store::write_atomic(path, to_text(area).as_bytes())
+pub fn save(path: &Path, area: &DisplayArea) -> io::Result<()> {
+    crate::store::write_atomic(path, to_text(area).as_bytes())
 }
 
 #[cfg(test)]
@@ -136,6 +159,14 @@ mod tests {
     }
 
     #[test]
+    fn the_size_is_the_monitor_the_area_was_computed_for() {
+        let (width, height) = size_mm(&area());
+
+        assert!((width - 597.0).abs() < 1e-9, "{width}");
+        assert!((height - 336.0).abs() < 1e-9, "{height}");
+    }
+
+    #[test]
     fn anything_but_three_finite_corners_is_rejected() {
         let good = "top_left 0 10 0\ntop_right 100 10 0\nbottom_left 0 0 0\n";
         assert!(from_text(good).is_some());
@@ -154,7 +185,7 @@ mod tests {
 
     #[test]
     fn saves_and_loads_through_a_file() {
-        let dir = std::env::temp_dir().join(format!("tobiid-display-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("tobii-calib-display-{}", std::process::id()));
         let path = dir.join(FILE_NAME);
         assert_eq!(load(&path).expect("absent is fine"), None);
         save(&path, &area()).expect("save");

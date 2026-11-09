@@ -1,7 +1,13 @@
-//! The C types of the Stream Engine 4.1 ABI that this library reads or
-//! writes. Layouts follow `tobii_stream_engine.dll` 4.1.0.3 (see
-//! `tools/abi/README.md` for how each was established); the tests pin every
-//! size and offset, and `abi-smoke.c` pins the same numbers from the C side.
+//! The C types of the Stream Engine 4.25 ABI that this library reads or
+//! writes. Layouts follow `tobii_stream_engine.dll` 4.25.0.3 but for one. Of
+//! the types here that 4.1.0.3 also has, 4.25.0.3 is known to have enlarged
+//! two: `tobii_gaze_raw_t`, 16 bytes longer, and
+//! `tobii_hardware_configuration_t`, whose four entries (3960 bytes,
+//! inferred) [`HardwareConfiguration`] does not follow: it keeps 4.1.0.3's
+//! two (2472 bytes). 4.1.0.3's layouts were established on that DLL (see
+//! `tools/abi/README.md`), and the comments below say where 4.25 differs or
+//! adds. The tests pin every size and offset, and `abi-smoke.c` pins the
+//! same numbers from the C side.
 
 use std::ffi::{c_char, c_void};
 
@@ -85,7 +91,8 @@ pub const TOBII_CAPABILITY_CALIBRATION_2D: u32 = 1;
 pub const TOBII_CAPABILITY_COMPOUND_STREAM_USER_POSITION_GUIDE_XY: u32 = 7;
 /// `tobii_capability_t`: user position guide z.
 pub const TOBII_CAPABILITY_COMPOUND_STREAM_USER_POSITION_GUIDE_Z: u32 = 8;
-/// Highest `tobii_capability_t` in 4.1.
+/// Highest `tobii_capability_t`, in 4.1 and 4.25 alike: both range-check 18
+/// (4.1 at 0x180141b81, 4.25 at 0x180081af0).
 pub const TOBII_CAPABILITY_MAX: u32 = 18;
 
 /// `tobii_stream_t`: gaze point.
@@ -745,8 +752,12 @@ pub struct HardwareConfigurationEntry {
 }
 
 /// `tobii_hardware_configuration_t` (undocumented, provisional: 2472 bytes,
-/// offsets from the DLL's copy at 0x18014abe0 and its PRP deserialiser at
-/// 0x180045056; the names and units are ours).
+/// offsets from 4.1.0.3's copy at 0x18014abe0 and its PRP deserialiser at
+/// 0x180045056; the names and units are ours). 4.25.0.3's record, which this
+/// does not follow, holds four entries (its deserialiser clamps the count at
+/// 4, 0x180201237, where 4.1.0.3's clamps it at 2, 0x18004506d): its copy
+/// (0x1800772c0) puts `point_count` at +0xba8, `points_xyz` from +0xbb0 and
+/// `mode` at +0xf70, so it is 3960 bytes (inferred).
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct HardwareConfiguration {

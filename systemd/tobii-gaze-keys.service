@@ -17,5 +17,13 @@ RestartSec=2
 # even if the daemon is still claiming the USB device.
 ExecStartPre=/bin/sh -c 'for i in $(seq 1 50); do [ -S "%t/tobiid.sock" ] && exit 0; sleep 0.1; done; exit 0'
 
+# default.target starts the binder at login, which pulls the daemon up with
+# it; tobiid.service wants the binder as well, so the tie Requires= makes is
+# symmetric. That second link is what makes it so: the daemon comes back by
+# itself, since any client's connect re-activates it through tobiid.socket,
+# while a unit systemd stopped stays stopped — Restart= covers a failure, not
+# a stop — and a plain `systemctl stop tobiid` used to leave the daemon
+# running with the binder dead. Enabling this unit makes both links, so a
+# user who has not enabled the binder never has it started.
 [Install]
-WantedBy=default.target
+WantedBy=default.target tobiid.service

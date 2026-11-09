@@ -9,7 +9,6 @@ mod catalogue;
 mod custom_command;
 mod daemon;
 mod device;
-mod display;
 mod extensions;
 mod frames;
 mod name;

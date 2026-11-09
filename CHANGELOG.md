@@ -6,8 +6,131 @@ release's; the full history is in the git log.
 This project keeps no compatibility promise of its own below 1.0, but
 `libtobii.so` does: it presents exactly the 199 entry points of Tobii's
 Stream Engine 4.25.0.3 and is held to them by `make verify-abi` on every
-change. Where an answer differs from the Windows DLL's it is deliberate and
-listed in the README's "where they differ from Windows".
+change. Where an answer differs from the Windows DLL's, and the difference is
+known, docs/stream-engine-api.md says so, by entry point or by family: with
+its reason, or marked as a mistake where it is one.
+
+## 0.6.0 — 2026-11-05
+
+### Changed
+
+- **The built-in calibration is the tracker's own power-up default, not the
+  capture author's.** A tracker with no saved calibration of the user's now
+  starts on id 0, the coarse default it powers up with, which
+  `init_packets_ep.txt` uploads in one bulk write instead of the captured
+  162-write upload of someone else's 660 KB blob. The replay also asks the
+  calibration status (1490) after the upload, so `device ready` and
+  `tobii-calibrate --status` report id 0 rather than the old blob's. The
+  blob is 1469 bytes with no point records and no serial number in it, and
+  a run on the hardware on 2026-11-05 confirmed the tracker takes it. Gaze
+  on the screen is coarser until the user calibrates: against a real
+  calibration measured then, mean error 18.9 mm / 1.8° at id 0 and 7.1 mm /
+  0.7° with one. Head pose and face presence are unaffected (100% valid at
+  id 0 in every phase of that run), but eye-closure detection degrades: a
+  closed eye still reports a tracked pupil in 64-71% of frames, where it
+  drops to 31-36% under a real calibration, so `tobii-gaze-keys`' winks and
+  `tobii-hub`'s per-eye display need a calibration to work well. The
+  author's blob no longer ships, and the replay carries no one's.
+
+### Fixed
+
+- **`tobii_responsive_gaze_point_subscribe` hands out the tracker's
+  responsive gaze point, not the filtered one.** 4.25's stream 12 is for the
+  tracker's own "Remote Gaze Point Responsive Combined" (stream 0x83 key
+  0x20 with validity 0x1f); until now libtobii handed out the filtered
+  combined point (key 0x1c) of its raw-gaze record, counting any non-zero
+  validity word as valid. `tobiid` now carries key 0x20 and its validity in
+  the tail of that record, with the frame's host time, and libtobii hands
+  them out, valid only when the tracker's word is 1. The record's C layout is
+  unchanged and the daemon protocol stays compatible both ways: a `tobiid`
+  from before the tail feeds nothing, as one without the frame's host time
+  already did, and an older client ignores the tail. `tobii_stream_supported`
+  still reports 12 supported; the DLL, driving an ET5 itself, most likely
+  refuses the subscribe, as docs/stream-engine-api.md says.
+
+## 0.5.0 — 2026-11-02
+
+### Upgrading
+
+- **Calibrated before 0.4.1, or with `--no-display-setup`? Calibrate
+  again.** Until 0.4.1 the display setup never succeeded, so a calibration
+  made then was made on whatever display area the tracker had, usually the
+  one the init capture carries (below), and gaze is scaled to that area
+  rather than to your monitor.
+
+### Fixed
+
+- **The documents named the wrong display area.** With nothing saved, the
+  tracker gets the area the Windows init capture carries, 633.6 × 334.3 mm
+  (a 28.2" screen, wider than 16:9), not the author's 27" monitor the README
+  and INSTALL.md said it was. Gaze is scaled to it: on a 24" 16:9 monitor,
+  looking at the left and right edges reads about 0.08 and 0.92, on a 49"
+  32:9 one about −0.44 and 1.44.
+- **Signing with an RSA key of 488 bits or fewer no longer aborts the
+  calling program.** `tobii_signing_sign` and
+  `tobii_signing_sign_with_private_key` answer
+  `TOBII_SIGNING_SIGN_FINAL_FAILED` for a key too short for the padding of a
+  SHA-256 digest, the step at which the DLL fails such a key (inferred), and
+  write nothing; until now the panic underneath aborted the process at the C
+  boundary.
+
+### Added
+
+- **A reminder to calibrate.** At login, `tobii-calibrate --remind` (an
+  autostart entry, `/etc/xdg/autostart/tobii-calibrate-remind.desktop`)
+  checks whether the tracker is plugged in and runs on the built-in
+  calibration, or on the user's calibration but no saved display area; if
+  so, a notification offers to calibrate, with *Calibrate* and *Don't remind
+  me* buttons, in English or Russian. Each reason comes at most three
+  times — at the first login, a day later, a week after that — and the
+  calibration's window takes the focus from the button where the
+  notification server hands over a token. The packages recommend
+  `notify-send` for the buttons; without them the notification is text.
+- **`tobii-calibrate` opens on the tracker's monitor more often, and Tab
+  moves it.** Without `--monitor` it took the primary monitor, which Wayland
+  does not name to programs, so it opened on the first monitor listed. It
+  now opens on the monitor the last calibration was made on (kept in
+  `~/.config/tobii/calibration-monitor`), else on the one the saved display
+  area fits by its EDID, else as before; and until the display setup is
+  answered, Tab (Shift+Tab: back) moves it to the next monitor, the setup
+  starting again there. `--list-monitors` shows each monitor's size and the
+  one it would open on.
+- **`tobii-calibrate --status`** says what the tracker runs on — your
+  calibration or the built-in one, your display area or the built-in one —
+  whether it is plugged in, and what to do: calibrate, calibrate again with
+  the display setup, or calibrate again because the display area changed
+  after the calibration was made. It reads the files tobiid reads, in the
+  environment systemd starts tobiid with, and starts no daemon. The bug
+  report template asks for it.
+
+### Removed
+
+- **The desktop entry's "Calibrate without the Display Setup" action.**
+  One click from the applications menu, it calibrated on whatever display
+  area the tracker had: with none saved, the init capture's
+  633.6 × 334.3 mm. `--no-display-setup` stays, for the terminal.
+
+### Changed
+
+- **tobiid warns when the tracker runs on the built-in calibration or
+  display area**, each time it starts the tracker: it logged a saved
+  calibration and said nothing of the built-in one. Set
+  `TOBII_CALIBRATION=embedded` and the calibration's line is information
+  instead, since you asked for it.
+- The installers' hints (the packages', `install.sh`'s and the AUR
+  recipe's) ask each user who wants gaze on the screen to calibrate, and
+  say who does not need to. A release's page now carries its section of
+  this changelog and the same note, not only a compare link.
+- **The documentation states the 4.25 contract throughout.**
+  docs/stream-engine-api.md now says what each of the 48 names 4.25 added
+  answers, and names one behaviour as a mistake not yet fixed:
+  `tobii_responsive_gaze_point_subscribe` hands out the filtered gaze point,
+  not the responsive one. The 0.3.0 entry below is corrected in place: of
+  the 46 entry points 4.25 adds, seventeen give real answers and
+  twenty-nine are refusals.
+- SECURITY.md lists the built-in calibration, the author's own, among what
+  is known, and `tools/calibration.json`, a decoded copy of its points, is
+  gone from the tree.
 
 ## 0.4.1 — 2026-10-28
 
@@ -116,12 +239,15 @@ checking it for null, where 4.1 and this library answer
 
 The library now follows Stream Engine **4.25.0.3** instead of 4.1.0.3.
 `libtobii.so` exports its whole surface — **199 entry points** against 4.1's
-153 — and `tobii_get_api_version` reports 4.25.0.3. Of the 46 names 4.25 adds
-(two more are renames), sixteen are implemented and thirty are refusals the
-DLL itself gives for a tracker it drives without the Tobii service; the README
-lists which. A client built against 4.1 is unaffected: no 4.1 entry point
-changed its signature, and the only struct that changed for it was already
-wrong (below).
+153 — and `tobii_get_api_version` reports 4.25.0.3. Of the 46 entry points
+4.25 adds (two more names are renames), seventeen give real answers and
+twenty-nine are refusals the DLL itself gives for a tracker it drives without
+the Tobii service, absolute eye openness aside (docs/stream-engine-api.md);
+the README lists which. A client built against 4.1 is unaffected unless it
+calls the undocumented `tobii_multiple_faces_position_subscribe` or
+`_unsubscribe`: 4.25 renamed them (below), so such a client no longer links.
+No other 4.1 entry point changed its signature, and the only struct that
+changed for it was already wrong (below).
 
 ### Entry points added from 4.25
 
@@ -129,16 +255,18 @@ wrong (below).
   `tobii_get_faults` and `tobii_get_warnings` write the same 512-byte text
   `tobii_get_state_string` gives for `TOBII_STATE_FAULT` and
   `TOBII_STATE_WARNING`, and `tobii_faults_subscribe` /
-  `tobii_warnings_subscribe` hand a subscriber the whole list on every change,
-  from the notifications the daemon already sent.
+  `tobii_warnings_subscribe` hand a subscriber the whole list each time the
+  tracker announces it, from the notifications the daemon already sent.
 - **`tobii_output_frequency_subscribe` / `_unsubscribe`.** 4.25 serves the
   output frequency as a stream beside the getter. The receiver is called once,
   from inside the subscribe, with the frequency the tracker runs at; the ET5
   never changes it, so there is no second call.
 - **`tobii_responsive_gaze_point_subscribe` / `_unsubscribe`**, the stream
-  4.25 numbers 12: the tracker's own less filtered combined gaze point, which
-  it sends beside the one `tobii_gaze_point_subscribe` delivers (stream 0x83
-  key 0x20). `tobii_stream_supported` now reports 12 supported.
+  4.25 numbers 12, meant to carry the tracker's own less filtered combined
+  gaze point, which it sends beside the one `tobii_gaze_point_subscribe`
+  delivers (stream 0x83 key 0x20); by a mistake not yet fixed it carries the
+  filtered one (docs/stream-engine-api.md). `tobii_stream_supported` now
+  reports 12 supported.
 
 - **4.25's presence stream**, `tobii_presence_subscribe` / `_unsubscribe`:
   the same status and timestamp `tobii_user_presence_subscribe` delivers, in a
@@ -167,15 +295,16 @@ wrong (below).
 
 ### Entry points that exist and refuse
 
-Thirty of 4.25's additions answer `TOBII_ERROR_NOT_SUPPORTED` once their
+Twenty-nine of 4.25's additions answer `TOBII_ERROR_NOT_SUPPORTED` once their
 arguments check out, which is what the DLL answers for a tracker it drives
-itself: the wearable image, wearable diagnostics image and wearable entrance
-pupil streams, the primary camera image, the 3-D facial landmarks and their
-group enumeration, the device log, absolute eye openness, proximity data
-collection, the algorithm-debug stream, the ambient light level (whose handler
-in 4.25 is itself a stub returning the same), the four remote-camera calls,
-the extended lens configuration trio and the two algo-box commands. None of
-them invents a record: where the audit could not name a field — the 40-byte
+itself, absolute eye openness aside: the wearable image, wearable diagnostics
+image and wearable entrance pupil streams, the primary camera image, the 3-D
+facial landmarks and their group enumeration, the device log, absolute eye
+openness, proximity data collection, the algorithm-debug stream, the ambient
+light level (whose handler in 4.25 is itself a stub returning the same), the
+four remote-camera calls, reading and writing the extended lens configuration,
+`tobii_force_frame_sequence` and `tobii_set_algo_box_mode`. None of them
+invents a record: where the audit could not name a field — the 40-byte
 primary-camera record, absolute eye openness, the two words of
 `tobii_force_frame_sequence` — nothing is declared for it.
 

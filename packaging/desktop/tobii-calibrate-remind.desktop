@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Tobii Calibration Reminder
+Name[ru]=Напоминание о калибровке Tobii
+Comment=Offers to calibrate the Tobii Eye Tracker 5 while it runs on the built-in calibration or display area
+Comment[ru]=Предлагает откалибровать Tobii Eye Tracker 5, пока он работает на встроенной калибровке или области экрана
+Exec=tobii-calibrate --remind
+TryExec=tobii-calibrate
+Icon=tobii-calibrate
+Terminal=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+X-GNOME-UsesNotifications=true

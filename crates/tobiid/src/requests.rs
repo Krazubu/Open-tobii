@@ -446,10 +446,10 @@ fn set_display_area(state: &Mutex<State>, client: u64, area: DisplayArea) -> Rep
 /// it at the next start. The same area again is not written (it would push
 /// the rollback copy out).
 pub(crate) fn save_display_area(path: &std::path::Path, area: &DisplayArea) {
-    if crate::display::load(path).ok().flatten() == Some(*area) {
+    if tobii_calib::display::load(path).ok().flatten() == Some(*area) {
         return;
     }
-    match crate::display::save(path, area) {
+    match tobii_calib::display::save(path, area) {
         Ok(()) => info!(
             path = %path.display(),
             width_mm = width_mm(area),
@@ -576,7 +576,7 @@ pub(crate) fn restore_saved_display_area(st: &mut State) {
     let Some(path) = st.display_file.clone() else {
         return;
     };
-    match crate::display::load(&path) {
+    match tobii_calib::display::load(&path) {
         Ok(Some(area)) => {
             info!(
                 path = %path.display(),
@@ -598,8 +598,8 @@ pub(crate) fn restore_saved_display_area(st: &mut State) {
 
 /// A monitor size from `TOBII_DISPLAY_MM=<width>x<height>[+<offset_x>]` (mm):
 /// the display area is computed from it and the tracker's mounting once the
-/// device reports the mounting, replacing the capture author's monitor that
-/// the init replay would otherwise leave configured.
+/// device reports the mounting, replacing the area the init replay would
+/// otherwise leave configured (the Windows capture's, 633.6 x 334.3 mm).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct DisplaySize {
     width_mm: f64,
@@ -1410,7 +1410,7 @@ pub(crate) mod tests {
         let (reply, configured) = set_area(1, &path, &area);
         let area = decode_display_area(&encode_display_area(&area)).expect("wire");
         assert_eq!((reply, configured), (Reply::ok(Vec::new()), Some(area)));
-        assert_eq!(crate::display::load(&path).expect("load"), Some(area));
+        assert_eq!(tobii_calib::display::load(&path).expect("load"), Some(area));
 
         let mut st = crate::daemon::tests::state_with_client(1);
         st.display_file = Some(path.clone());

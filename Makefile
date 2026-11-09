@@ -1,7 +1,7 @@
 # Build and install the Tobii Linux stack.
 #
 #   make build            # cargo build --release
-#   make install          # binaries + libtobii.so + headers + udev rules + desktop entry (sudo) + user units
+#   make install          # binaries + libtobii.so + headers + udev rules + desktop entries (sudo) + user units
 #   make enable           # start the always-on user service now
 #   make uninstall        # remove everything installed by `make install`
 #   make stage DESTDIR=d  # lay out what the packages carry under d (no sudo, nothing else touched)
@@ -17,6 +17,9 @@ INCLUDEDIR  ?= $(PREFIX)/include
 DATADIR     ?= $(PREFIX)/share
 DOCDIR      ?= $(DATADIR)/doc/open-tobii
 UDEVDIR     ?= /etc/udev/rules.d
+# Where the desktop's autostart looks for every user's entries (XDG), and
+# so where `tobii-calibrate --remind` goes, whatever the PREFIX.
+AUTOSTARTDIR ?= /etc/xdg/autostart
 # The dynamic loader does not search /usr/local/lib everywhere (Fedora, for
 # one): a Stream Engine client linked with -ltobii would not start. This
 # file adds LIBDIR to its search path.
@@ -54,15 +57,17 @@ LIB         := libtobii.so
 UDEV_RULES  := 70-tobii-uaccess.rules 70-tobii-uinput.rules 99-tobii-no-uvcvideo.rules
 LEGACY_UDEV_RULES := 99-tobii-uaccess.rules 99-tobii-uinput.rules
 UNITS       := tobiid.service tobiid.socket tobii-gaze-keys.service tobii-opentrack.service
-# tobii-calibrate's entry among the desktop's applications, and its icon.
+# tobii-calibrate's entry among the desktop's applications, and its icon;
+# AUTOSTART runs its reminder at login.
 DESKTOP     := packaging/desktop/tobii-calibrate.desktop
+AUTOSTART   := packaging/desktop/tobii-calibrate-remind.desktop
 ICON        := packaging/desktop/tobii-calibrate.svg
 ICONDIR     := $(DATADIR)/icons/hicolor
 # The units run the binaries of a build in ~/Work/tobii and the desktop
-# entry the one in PATH; installed, both run the ones in BINDIR, and the
+# entries the one in PATH; installed, both run the ones in BINDIR, and the
 # units lose their notes on the build's path.
 UNIT_SED    = /^\# Dev build path/d; s|^ExecStart=%h/Work/tobii/target/release/|ExecStart=$(BINDIR)/|
-DESKTOP_SED = s|^Exec=tobii-calibrate|Exec=$(BINDIR)/tobii-calibrate|
+DESKTOP_SED = s|^Exec=tobii-calibrate|Exec=$(BINDIR)/tobii-calibrate|; s|^TryExec=tobii-calibrate|TryExec=$(BINDIR)/tobii-calibrate|
 # The packages' documentation, with the licences and notices of what the
 # binaries carry: the MediaPipe models and ONNX Runtime in tobiid, and the
 # crates, in THIRD_PARTY (a file packaging/build.sh writes with cargo-about).
@@ -73,8 +78,8 @@ THIRD_PARTY ?=
 INCSRC      := crates/tobii-ffi/include
 ABI_SMOKE   := crates/tobii-ffi/abi-smoke.c
 
-# The entry points libtobii.so presents to C — exactly the 153 exports of the
-# Stream Engine 4.1.0.3 DLL — and the headers that declare them are its whole
+# The entry points libtobii.so presents to C — exactly the 199 exports of the
+# Stream Engine 4.25.0.3 DLL — and the headers that declare them are its whole
 # contract with consumers such as OpenTrack's tracker-tobii. `verify-abi`
 # checks both against the built library.
 ABI_LIST    := crates/tobii-ffi/abi-symbols.txt
@@ -115,8 +120,8 @@ check-udev:
 	done
 
 check-desktop:
-	@if command -v desktop-file-validate > /dev/null; then desktop-file-validate $(DESKTOP); \
-	else echo "desktop-file-validate not found: $(DESKTOP) not checked"; fi
+	@if command -v desktop-file-validate > /dev/null; then desktop-file-validate $(DESKTOP) $(AUTOSTART); \
+	else echo "desktop-file-validate not found: $(DESKTOP) $(AUTOSTART) not checked"; fi
 
 # libtobii.so must keep exporting exactly the listed entry points, and a
 # Stream-Engine-shaped C program must still compile against the headers, link
@@ -137,17 +142,20 @@ verify-abi: build
 
 # Every file the packages carry, laid out under DESTDIR as installed under
 # PREFIX, and nothing else: no sudo, no reloads, nothing outside DESTDIR.
-# The udev rules go to UDEVDIR, the user units to SYSTEMDUSERDIR.
+# The udev rules go to UDEVDIR, the user units to SYSTEMDUSERDIR, the
+# reminder's autostart entry to AUTOSTARTDIR.
 stage: build
 	@test -n "$(DESTDIR)" || { echo "make stage lays the files out under DESTDIR=…, not in place: give it one"; exit 1; }
 	install -Dm 0755 -t $(DESTDIR)$(BINDIR) $(addprefix $(REL)/,$(BINS))
 	install -Dm 0644 -t $(DESTDIR)$(LIBDIR) $(REL)/$(LIB)
 	install -Dm 0644 -t $(DESTDIR)$(INCLUDEDIR)/tobii $(HEADERS)
 	install -Dm 0644 -t $(DESTDIR)$(UDEVDIR) $(addprefix systemd/,$(UDEV_RULES))
-	install -d $(DESTDIR)$(SYSTEMDUSERDIR) $(DESTDIR)$(DATADIR)/applications
+	install -d $(DESTDIR)$(SYSTEMDUSERDIR) $(DESTDIR)$(DATADIR)/applications $(DESTDIR)$(AUTOSTARTDIR)
 	$(call write-units,$(DESTDIR)$(SYSTEMDUSERDIR))
 	sed '$(DESKTOP_SED)' $(DESKTOP) > $(DESTDIR)$(DATADIR)/applications/$(notdir $(DESKTOP))
 	chmod 0644 $(DESTDIR)$(DATADIR)/applications/$(notdir $(DESKTOP))
+	sed '$(DESKTOP_SED)' $(AUTOSTART) > $(DESTDIR)$(AUTOSTARTDIR)/$(notdir $(AUTOSTART))
+	chmod 0644 $(DESTDIR)$(AUTOSTARTDIR)/$(notdir $(AUTOSTART))
 	install -Dm 0644 -t $(DESTDIR)$(ICONDIR)/scalable/apps $(ICON)
 	install -Dm 0644 -t $(DESTDIR)$(DOCDIR) $(DOCS)
 	install -Dm 0644 -t $(DESTDIR)$(DOCDIR)/models $(MODEL_DOCS)
@@ -196,6 +204,8 @@ install-udev:
 install-desktop:
 	sed '$(DESKTOP_SED)' $(DESKTOP) > $(REL)/$(notdir $(DESKTOP))
 	$(SUDO) install -Dm 0644 $(REL)/$(notdir $(DESKTOP)) $(DATADIR)/applications/$(notdir $(DESKTOP))
+	sed '$(DESKTOP_SED)' $(AUTOSTART) > $(REL)/$(notdir $(AUTOSTART))
+	$(SUDO) install -Dm 0644 $(REL)/$(notdir $(AUTOSTART)) $(AUTOSTARTDIR)/$(notdir $(AUTOSTART))
 	$(SUDO) install -Dm 0644 $(ICON) $(ICONDIR)/scalable/apps/$(notdir $(ICON))
 	-if [ -f $(ICONDIR)/icon-theme.cache ]; then $(SUDO) gtk-update-icon-cache -q $(ICONDIR); fi
 
@@ -231,6 +241,7 @@ uninstall: disable
 	-$(SUDO) rmdir $(INCLUDEDIR)/tobii 2>/dev/null
 	$(SUDO) rm -f $(addprefix $(UDEVDIR)/,$(UDEV_RULES) $(LEGACY_UDEV_RULES))
 	$(SUDO) rm -f $(DATADIR)/applications/$(notdir $(DESKTOP)) $(ICONDIR)/scalable/apps/$(notdir $(ICON))
+	$(SUDO) rm -f $(AUTOSTARTDIR)/$(notdir $(AUTOSTART))
 	-if [ -f $(ICONDIR)/icon-theme.cache ]; then $(SUDO) gtk-update-icon-cache -q $(ICONDIR); fi
 	$(SUDO) udevadm control --reload || true
 	$(SUDO) ldconfig || true

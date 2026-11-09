@@ -1,7 +1,8 @@
 //! The calibration window: fullscreen on the chosen monitor, drawn in
 //! software. It displays what the worker reports (targets, progress, the
 //! result), runs the display setup (ticks moved by mouse and keyboard, the
-//! answer sent back to the worker) and turns Esc into an abort.
+//! answer sent back to the worker) and turns Esc into an abort. Until the
+//! setup is answered, Tab moves it to the next monitor.
 
 use std::num::NonZeroU32;
 use std::rc::Rc;
@@ -17,6 +18,10 @@ use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::keyboard::{Key, NamedKey};
 use winit::monitor::MonitorHandle;
+#[cfg(target_os = "linux")]
+use winit::platform::startup_notify::{
+    EventLoopExtStartupNotify, WindowAttributesExtStartupNotify,
+};
 #[cfg(target_os = "linux")]
 use winit::platform::wayland::WindowAttributesExtWayland;
 use winit::window::{Fullscreen, Window, WindowId};
@@ -41,12 +46,24 @@ const GAZE: u32 = rgb(90, 160, 255);
 /// Which monitor to calibrate on.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum MonitorChoice {
-    /// The primary monitor, or the first one.
+    /// The monitor the last calibration was made on, else the one the
+    /// saved display area fits (see [`fitting`]), else the primary one,
+    /// else the first: winit knows no primary monitor on Wayland. Tab moves
+    /// the window on until the display setup is answered.
     Default,
     /// By position in the list `--list-monitors` prints.
     Index(usize),
     /// The first monitor whose name contains this.
     Name(String),
+}
+
+/// What [`MonitorChoice::Default`] goes by.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct Remembered {
+    /// The monitor the last calibration was made on, by name.
+    pub(crate) monitor: Option<String>,
+    /// The saved display area's size, mm.
+    pub(crate) area_mm: Option<(f64, f64)>,
 }
 
 /// What is on screen.
@@ -140,6 +157,19 @@ pub(crate) struct Ui {
     monitor_name: Option<String>,
     /// How many monitors there are.
     monitor_count: usize,
+    /// What the window opens on by default.
+    remembered: Remembered,
+    /// Where `target` is among the monitors, and how many there are.
+    monitor_position: Option<(usize, usize)>,
+    /// Set once the display setup is answered or a point is shown: the
+    /// calibration then belongs to its monitor, and Tab moves it no more.
+    monitor_fixed: bool,
+    /// What the setup on screen was asked with, to set it up again on
+    /// another monitor.
+    setup_request: Option<crate::sequence::SetupRequest>,
+    /// The window moved to another monitor during the setup: set it up
+    /// again once it is fullscreen there.
+    setup_stale: bool,
     /// The monitor the fullscreen window must stay on.
     target: Option<MonitorHandle>,
     /// When the window was made: the compositor gets a moment to place it.
@@ -204,6 +234,11 @@ const PENDING_CHECK: Duration = Duration::from_millis(100);
 /// the monitor in use), and the pause between tries.
 const PLACEMENT_TRIES: u32 = 5;
 const PLACEMENT_PAUSE: Duration = Duration::from_millis(500);
+
+/// How close a monitor's EDID size must come to the saved display area's
+/// for the window to open on it by default. An area set up on a monitor
+/// with a usable EDID has exactly its size.
+const FIT_TOLERANCE_MM: f64 = 5.0;
 
 /// Whether to ask for a frame now, and when to wake up next: frames at most
 /// every [`FRAME_INTERVAL`], never a wake-up in the past.
@@ -297,6 +332,11 @@ impl Ui {
             answers,
             monitor_name: None,
             monitor_count: 0,
+            remembered: Remembered::default(),
+            monitor_position: None,
+            monitor_fixed: false,
+            setup_request: None,
+            setup_stale: false,
             target: None,
             created: None,
             placement_tries: 0,
@@ -308,6 +348,19 @@ impl Ui {
             failed: None,
             escaped: false,
         }
+    }
+
+    /// Open by default on the monitor `remembered` names, or the one the
+    /// saved display area fits.
+    #[must_use]
+    pub(crate) fn with_remembered(mut self, remembered: Remembered) -> Self {
+        self.remembered = remembered;
+        self
+    }
+
+    /// The name of the monitor the window is to be fullscreen on.
+    pub(crate) fn monitor_name(&self) -> Option<&str> {
+        self.monitor_name.as_deref()
     }
 
     /// The display setup, while it is on screen.
@@ -369,6 +422,12 @@ impl Ui {
                 tracing::info!("the window is back on its monitor");
                 self.epoch += 1;
                 self.request_frame();
+            }
+            // Fullscreen on the monitor Tab moved it to: its own setup, once.
+            // Not at a resize: a move between monitors of one size has none,
+            // and the window may learn its new monitor only after it.
+            if std::mem::take(&mut self.setup_stale) {
+                self.refresh_setup();
             }
             return None;
         };
@@ -549,7 +608,70 @@ impl Ui {
         if self.answers.send(choice).is_err() {
             tracing::warn!("the calibration worker is gone");
         }
+        // The area is this monitor's now.
+        self.monitor_fixed = true;
         self.show(Screen::Status(SETTING_DISPLAY_AREA.into()));
+    }
+
+    /// Whether Tab may move the window: fullscreen, and the calibration not
+    /// yet bound to its monitor.
+    fn can_switch(&self) -> bool {
+        !self.windowed && !self.monitor_fixed && self.target.is_some()
+    }
+
+    /// Tab (Shift+Tab: back): fullscreen on the next monitor, round the
+    /// list. A setup on screen starts again there, from that monitor's EDID.
+    fn switch_monitor(&mut self, event_loop: &ActiveEventLoop, forward: bool) {
+        if !self.can_switch() {
+            return;
+        }
+        let monitors: Vec<MonitorHandle> = event_loop.available_monitors().collect();
+        let current = self
+            .target
+            .as_ref()
+            .and_then(|t| monitors.iter().position(|m| m == t));
+        let Some((index, next)) = next_index(current, monitors.len(), forward)
+            .and_then(|i| monitors.get(i).map(|m| (i, m.clone())))
+        else {
+            return;
+        };
+        tracing::info!(
+            monitor = next.name().as_deref().unwrap_or("?"),
+            "moving to another monitor"
+        );
+        self.monitor_name = next.name();
+        self.monitor_count = monitors.len();
+        self.monitor_position = Some((index, monitors.len()));
+        self.target = Some(next.clone());
+        // The compositor gets its moment again, and the tries start over.
+        self.created = Some(Instant::now());
+        self.placement_tries = 0;
+        self.placement_last = None;
+        self.misplaced = None;
+        // Relaxed: a pure signal to the worker.
+        self.placed.store(false, Ordering::Relaxed);
+        if let Some(window) = &self.window {
+            window.set_fullscreen(None);
+            window.set_fullscreen(Some(Fullscreen::Borderless(Some(next))));
+        }
+        if matches!(self.screen, Screen::DisplaySetup(_)) {
+            self.setup_stale = true;
+            self.refresh_setup();
+        }
+        self.epoch += 1;
+        self.request_frame();
+    }
+
+    /// The setup on screen, set up again for the monitor the window is on.
+    fn refresh_setup(&mut self) {
+        if !matches!(self.screen, Screen::DisplaySetup(_)) {
+            return;
+        }
+        if let Some(req) = self.setup_request
+            && let Some(screen) = self.setup_screen(req)
+        {
+            self.show(screen);
+        }
     }
 
     /// Ask for a frame as soon as the backend allows.
@@ -568,8 +690,21 @@ impl Ui {
                 .iter()
                 .find(|m| m.name().is_some_and(|n| n.contains(part.as_str())))
                 .cloned(),
-            MonitorChoice::Default => event_loop
-                .primary_monitor()
+            MonitorChoice::Default => self
+                .remembered
+                .monitor
+                .as_deref()
+                .and_then(|name| monitors.iter().find(|m| m.name().as_deref() == Some(name)))
+                .cloned()
+                .or_else(|| {
+                    let saved = self.remembered.area_mm?;
+                    let sizes: Vec<_> = monitors
+                        .iter()
+                        .map(|m| edid_size(m, monitors.len()))
+                        .collect();
+                    monitors.get(fitting(&sizes, saved)?).cloned()
+                })
+                .or_else(|| event_loop.primary_monitor())
                 .or_else(|| monitors.first().cloned()),
         }
     }
@@ -579,6 +714,13 @@ impl Ui {
         // may need the whole surface back, not just what moved.
         let asked = std::mem::take(&mut self.redraw_pending);
         self.dirty = false;
+        let switchable = self.can_switch();
+        let monitor_hint = monitor_hint(
+            self.monitor_name.as_deref(),
+            self.monitor_position,
+            switchable,
+            &self.screen,
+        );
         let (Some(window), Some(surface)) = (self.window.as_ref(), self.surface.as_mut()) else {
             return;
         };
@@ -611,6 +753,9 @@ impl Ui {
         paint(&mut c, &self.screen, elapsed, self.timing, self.gaze);
         if let Some(wanted) = &self.misplaced {
             paint_misplaced(&mut c, wanted);
+        }
+        if let Some(hint) = &monitor_hint {
+            paint_monitor_hint(&mut c, hint);
         }
         let painted = started.elapsed();
 
@@ -668,6 +813,45 @@ fn screen_name(screen: &Screen) -> &'static str {
         Screen::Failed(_) => "failed",
         Screen::DisplaySetup(_) => "display setup",
     }
+}
+
+/// A monitor's size from its EDID, as it reports it, among `monitors`.
+fn edid_size(monitor: &MonitorHandle, monitors: usize) -> Option<(f64, f64)> {
+    crate::edid::monitor_size_mm(monitor.name().as_deref(), monitors)
+}
+
+/// Which of the monitors, by their EDID sizes, a saved display area of
+/// `saved` mm was set up on: the only one within [`FIT_TOLERANCE_MM`] of it,
+/// either way round (a monitor turned to portrait reports its landscape
+/// size), or none.
+fn fitting(sizes: &[Option<(f64, f64)>], saved: (f64, f64)) -> Option<usize> {
+    let close = |a: f64, b: f64| (a - b).abs() <= FIT_TOLERANCE_MM;
+    let fits = |&(w, h): &(f64, f64)| {
+        (close(w, saved.0) && close(h, saved.1)) || (close(h, saved.0) && close(w, saved.1))
+    };
+    let mut found = sizes
+        .iter()
+        .enumerate()
+        .filter(|(_, size)| size.as_ref().is_some_and(fits))
+        .map(|(i, _)| i);
+    let first = found.next()?;
+    found.next().is_none().then_some(first)
+}
+
+/// The monitor after (`forward`) or before `current` among `count`, round
+/// the list; the first if `current` is gone; none with fewer than two.
+fn next_index(current: Option<usize>, count: usize, forward: bool) -> Option<usize> {
+    if count < 2 {
+        return None;
+    }
+    let Some(current) = current.filter(|i| *i < count) else {
+        return Some(0);
+    };
+    Some(if forward {
+        (current + 1) % count
+    } else {
+        (current + count - 1) % count
+    })
 }
 
 /// Where the setup screen draws: the ticks from `tick_top` to the bottom
@@ -889,6 +1073,33 @@ fn paint_misplaced(c: &mut Canvas<'_>, wanted: &str) {
     );
 }
 
+/// The line that says Tab moves the window, while it may: on the screens
+/// before the points (the waiting and the setup), with another monitor to
+/// go to. `position` is the monitor's index and how many there are.
+fn monitor_hint(
+    name: Option<&str>,
+    position: Option<(usize, usize)>,
+    switchable: bool,
+    screen: &Screen,
+) -> Option<String> {
+    let (index, count) = position?;
+    let before_points = matches!(screen, Screen::Status(_) | Screen::DisplaySetup(_));
+    (switchable && before_points && count > 1).then(|| {
+        format!(
+            "Tab: next monitor, if the tracker is not on this one ({}, {} of {count})",
+            name.unwrap_or("unnamed"),
+            index + 1
+        )
+    })
+}
+
+/// [`monitor_hint`]'s line, near the top, below where [`paint_misplaced`]
+/// warns.
+fn paint_monitor_hint(c: &mut Canvas<'_>, hint: &str) {
+    let s = scale_for(c.height);
+    c.text_centered(4 * 8 * s, s, MUTED, hint);
+}
+
 #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)] // reason: screen-sized values
 fn paint_setup(c: &mut Canvas<'_>, setup: &Setup, s: usize, unit: f32) {
     let (w, h) = (c.width, c.height);
@@ -924,10 +1135,19 @@ fn paint_setup(c: &mut Canvas<'_>, setup: &Setup, s: usize, unit: f32) {
 impl ApplicationHandler<UiEvent> for Ui {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.list_only {
-            for (i, m) in event_loop.available_monitors().enumerate() {
+            let monitors: Vec<MonitorHandle> = event_loop.available_monitors().collect();
+            let chosen = self.pick_monitor(event_loop);
+            for (i, m) in monitors.iter().enumerate() {
                 let size = m.size();
+                let mm = edid_size(m, monitors.len())
+                    .map_or_else(String::new, |(w, h)| format!(", {w:.0} x {h:.0} mm"));
+                let mark = if chosen.as_ref() == Some(m) {
+                    "  <- calibrates here"
+                } else {
+                    ""
+                };
                 println!(
-                    "{i}: {} ({}x{})",
+                    "{i}: {} ({}x{}{mm}){mark}",
                     m.name().unwrap_or_else(|| "unnamed".into()),
                     size.width,
                     size.height
@@ -945,6 +1165,12 @@ impl ApplicationHandler<UiEvent> for Ui {
         #[cfg(target_os = "linux")]
         {
             attributes = attributes.with_name(APP_ID, APP_ID);
+            // Started from the reminder's button (or a launcher that hands one
+            // over), the window takes the focus with the token it was given:
+            // the keys must reach it, not the window the user was in.
+            if let Some(token) = event_loop.read_token_from_env() {
+                attributes = attributes.with_activation_token(token);
+            }
         }
         if self.windowed {
             attributes = attributes.with_inner_size(LogicalSize::new(1280.0, 800.0));
@@ -954,8 +1180,18 @@ impl ApplicationHandler<UiEvent> for Ui {
                 event_loop.exit();
                 return;
             };
+            let monitors: Vec<MonitorHandle> = event_loop.available_monitors().collect();
+            tracing::info!(
+                monitor = monitor.name().as_deref().unwrap_or("?"),
+                monitors = monitors.len(),
+                "calibrating on this monitor"
+            );
             self.monitor_name = monitor.name();
-            self.monitor_count = event_loop.available_monitors().count();
+            self.monitor_count = monitors.len();
+            self.monitor_position = monitors
+                .iter()
+                .position(|m| *m == monitor)
+                .map(|i| (i, monitors.len()));
             self.target = Some(monitor.clone());
             self.created = Some(Instant::now());
             attributes = attributes.with_fullscreen(Some(Fullscreen::Borderless(Some(monitor))));
@@ -1010,8 +1246,18 @@ impl ApplicationHandler<UiEvent> for Ui {
                 self.failed = Some(text.clone());
                 Some(Screen::Failed(text))
             }
-            UiEvent::DisplaySetup(req) => self.setup_screen(req),
+            UiEvent::DisplaySetup(req) => {
+                self.setup_request = Some(req);
+                self.setup_screen(req)
+            }
         };
+        if matches!(
+            next,
+            Some(Screen::Target { .. } | Screen::Computing | Screen::Finished(_))
+        ) {
+            // The points are on this monitor now.
+            self.monitor_fixed = true;
+        }
         // A gaze sample only shows on an animating screen, whose next paced
         // frame picks it up; a new screen is drawn at once.
         if let Some(screen) = next {
@@ -1035,6 +1281,15 @@ impl ApplicationHandler<UiEvent> for Ui {
                 self.abort.store(true, Ordering::Relaxed);
                 self.escaped = true;
                 event_loop.exit();
+            }
+            WindowEvent::KeyboardInput { event, .. }
+                if event.state == ElementState::Pressed
+                    && event.logical_key == Key::Named(NamedKey::Tab) =>
+            {
+                // Not on a held key's repeats: one press, one monitor.
+                if !event.repeat {
+                    self.switch_monitor(event_loop, !self.shift);
+                }
             }
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
                 self.setup_key(&event.logical_key);
@@ -1363,6 +1618,64 @@ mod tests {
         assert_eq!(damage(None, 3, (640, 360), moving, true), None);
         let partial = damage(last, 3, (640, 360), moving, true).expect("partial");
         assert_eq!(partial, Bounds::union(last.and_then(|l| l.moving), moving));
+    }
+
+    #[test]
+    fn the_saved_area_picks_the_one_monitor_of_its_size() {
+        let (small, large) = (Some((527.0, 296.0)), Some((597.0, 336.0)));
+
+        assert_eq!(fitting(&[small, large], (597.0, 336.0)), Some(1));
+        assert_eq!(fitting(&[small, large], (598.5, 333.0)), Some(1));
+        // Set up turned to portrait: the EDID still says landscape.
+        assert_eq!(fitting(&[small, large], (336.0, 597.0)), Some(1));
+        assert_eq!(fitting(&[None, small], (527.0, 296.0)), Some(1));
+        // Measured by hand on a monitor without an EDID, or not here.
+        assert_eq!(fitting(&[small, large], (633.6, 334.3)), None);
+        assert_eq!(fitting(&[None, None], (597.0, 336.0)), None);
+        // Two of that size: not a guess.
+        assert_eq!(fitting(&[large, small, large], (597.0, 336.0)), None);
+    }
+
+    #[test]
+    fn tab_goes_round_the_monitors() {
+        assert_eq!(next_index(Some(0), 3, true), Some(1));
+        assert_eq!(next_index(Some(2), 3, true), Some(0));
+        assert_eq!(next_index(Some(0), 3, false), Some(2));
+        assert_eq!(next_index(Some(1), 2, false), Some(0));
+        // The window's monitor went away: start from the first.
+        assert_eq!(next_index(None, 2, true), Some(0));
+        assert_eq!(next_index(Some(5), 2, true), Some(0));
+        assert_eq!(next_index(Some(0), 1, true), None);
+        assert_eq!(next_index(None, 0, true), None);
+    }
+
+    #[test]
+    fn tab_is_offered_before_the_points_with_another_monitor_to_go_to() {
+        let waiting = Screen::Status("waiting for the tracker...".into());
+        let setup = Screen::DisplaySetup(setup_screen(640.0));
+        let point = Screen::Target {
+            at: [0.5, 0.5],
+            from: [0.5, 0.5],
+            phase: Phase::Dwell,
+            step: 1,
+            total: 14,
+        };
+
+        let hint = monitor_hint(Some("DP-3"), Some((1, 2)), true, &setup).expect("offered");
+
+        assert!(
+            hint.contains("Tab") && hint.ends_with("(DP-3, 2 of 2)"),
+            "{hint}"
+        );
+        assert!(hint.chars().count() <= 72, "fits a 16:9 screen: {hint}");
+        assert!(monitor_hint(None, Some((0, 2)), true, &waiting).is_some());
+        assert_eq!(monitor_hint(Some("DP-3"), Some((0, 1)), true, &setup), None);
+        assert_eq!(
+            monitor_hint(Some("DP-3"), Some((0, 2)), false, &setup),
+            None
+        );
+        assert_eq!(monitor_hint(Some("DP-3"), Some((0, 2)), true, &point), None);
+        assert_eq!(monitor_hint(Some("DP-3"), None, true, &setup), None);
     }
 
     #[test]

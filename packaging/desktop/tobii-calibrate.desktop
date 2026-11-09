@@ -11,12 +11,7 @@ Icon=tobii-calibrate
 Terminal=false
 StartupNotify=false
 StartupWMClass=tobii-calibrate
+X-GNOME-UsesNotifications=true
 Categories=Settings;HardwareSettings;
 Keywords=tobii;eye;tracker;gaze;calibration;
 Keywords[ru]=tobii;глаза;айтрекер;взгляд;калибровка;
-Actions=no-display-setup;
-
-[Desktop Action no-display-setup]
-Name=Calibrate without the Display Setup
-Name[ru]=Калибровка без настройки экрана
-Exec=tobii-calibrate --no-display-setup

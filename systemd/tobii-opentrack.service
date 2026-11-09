@@ -22,5 +22,11 @@ RestartSec=2
 # even if the daemon is still claiming the USB device.
 ExecStartPre=/bin/sh -c 'for i in $(seq 1 50); do [ -S "%t/tobiid.sock" ] && exit 0; sleep 0.1; done; exit 0'
 
+# As for the gaze-to-keyboard binder: default.target starts this at login and
+# pulls the daemon up, and tobiid.service wants it too, so a daemon stopped
+# and then brought back — any client's connect re-activates it through
+# tobiid.socket — brings this back with it, where Restart= above covers only
+# a failure. Enabling this unit makes both links; a one-off
+# `systemctl --user start` makes neither.
 [Install]
-WantedBy=default.target
+WantedBy=default.target tobiid.service

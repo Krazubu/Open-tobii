@@ -2,7 +2,7 @@
 //!
 //! The daemon saves every calibration it computes or is given, and the engine
 //! uploads the saved one at init instead of the calibration embedded in its
-//! replay (which is the author's). Where it lives:
+//! replay (the tracker's power-up default, id 0). Where it lives:
 //!
 //! 1. `$TOBII_CALIBRATION` — a path, or `embedded` to ignore any saved file;
 //! 2. `$XDG_CONFIG_HOME/tobii/calibration.bin`;
@@ -38,11 +38,28 @@ pub enum Location {
 /// The configured location, from the environment.
 #[must_use]
 pub fn configured() -> Location {
-    locate(
-        std::env::var_os(ENV_OVERRIDE),
-        std::env::var_os("XDG_CONFIG_HOME"),
-        std::env::var_os("HOME"),
-    )
+    configured_by(|name: &str| std::env::var_os(name))
+}
+
+/// [`configured`] in the environment `var` gives (a variable's value by
+/// name): where another process, such as the daemon, finds the calibration.
+#[must_use]
+pub fn configured_by(var: impl Fn(&str) -> Option<OsString>) -> Location {
+    locate(var(ENV_OVERRIDE), var("XDG_CONFIG_HOME"), var("HOME"))
+}
+
+/// Whether the user asked for the built-in calibration
+/// (`TOBII_CALIBRATION=embedded`), rather than having none of their own:
+/// both are [`Location::Embedded`] or a file that is not there.
+#[must_use]
+pub fn embedded_chosen() -> bool {
+    embedded_chosen_by(|name: &str| std::env::var_os(name))
+}
+
+/// [`embedded_chosen`] in the environment `var` gives.
+#[must_use]
+pub fn embedded_chosen_by(var: impl Fn(&str) -> Option<OsString>) -> bool {
+    var(ENV_OVERRIDE).is_some_and(|v| v == EMBEDDED)
 }
 
 fn locate(overridden: Option<OsString>, xdg: Option<OsString>, home: Option<OsString>) -> Location {
@@ -63,10 +80,13 @@ fn locate(overridden: Option<OsString>, xdg: Option<OsString>, home: Option<OsSt
 /// is set.
 #[must_use]
 pub fn config_dir() -> Option<PathBuf> {
-    tobii_dir(
-        std::env::var_os("XDG_CONFIG_HOME"),
-        std::env::var_os("HOME"),
-    )
+    config_dir_by(|name: &str| std::env::var_os(name))
+}
+
+/// [`config_dir`] in the environment `var` gives.
+#[must_use]
+pub fn config_dir_by(var: impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
+    tobii_dir(var("XDG_CONFIG_HOME"), var("HOME"))
 }
 
 fn tobii_dir(xdg: Option<OsString>, home: Option<OsString>) -> Option<PathBuf> {
@@ -244,6 +264,15 @@ mod tests {
             Location::File("/h/.config/tobii/calibration.bin".into())
         );
         assert_eq!(locate(None, None, None), Location::Embedded);
+        let daemons = |name: &str| match name {
+            ENV_OVERRIDE => os("/d/c.bin"),
+            "HOME" => os("/h"),
+            _ => None,
+        };
+        assert_eq!(configured_by(daemons), Location::File("/d/c.bin".into()));
+        assert!(!embedded_chosen_by(daemons));
+        assert!(embedded_chosen_by(|_| os(EMBEDDED)));
+        assert_eq!(config_dir_by(daemons), Some("/h/.config/tobii".into()));
         assert_eq!(tobii_dir(None, os("/h")), Some("/h/.config/tobii".into()));
         assert_eq!(tobii_dir(os("/x"), os("/h")), Some("/x/tobii".into()));
     }
@@ -292,12 +321,12 @@ mod tests {
     fn save_load_rotate_remove() {
         let scratch = Scratch::new("store");
         let path = scratch.0.join("tobii").join("calibration.bin");
-        let first = crate::blob::tests::embedded_blob();
+        let first = crate::testing::device_like(7);
         let mut second = first.clone();
         second[20..24].copy_from_slice(&42u32.to_le_bytes());
 
         assert!(load(&path).expect("absent is fine").is_none());
-        assert_eq!(save(&path, &first).expect("save").id, 1_904_654_973);
+        assert_eq!(save(&path, &first).expect("save").id, 7);
         assert_eq!(save(&path, &second).expect("save").id, 42);
 
         let (loaded, info) = load(&path).expect("load").expect("present");

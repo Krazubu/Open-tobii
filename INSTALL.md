@@ -3,7 +3,7 @@
 Linux stack for the **Tobii Eye Tracker 5** (USB `2104:0313`): a daemon that
 claims the device once and serves head pose / gaze / presence (and everything
 else the Stream Engine offers) to multiple clients, a drop-in `libtobii.so` for
-the Stream Engine 4.1 C API, a calibration tool and an OpenTrack bridge.
+the Stream Engine 4.25 C API, a calibration tool and an OpenTrack bridge.
 
 ```
 libtobii.so / tobii-opentrack ──unix socket──▶ tobiid ──USB──▶ Tobii ET5
@@ -34,6 +34,7 @@ for x86_64, the daemon, `libtobii.so` and its headers, `tobii-calibrate`
 | Fedora 36+, RHEL/Alma/Rocky 10 | `sudo dnf install ./open-tobii-<version>-1.x86_64.rpm` | `sudo dnf remove open-tobii` |
 | openSUSE Tumbleweed, Leap 16 | `sudo zypper install --allow-unsigned-rpm ./open-tobii-<version>-1.x86_64.rpm` | `sudo zypper remove open-tobii` |
 | any other with systemd and glibc 2.35+ (Arch, …) | `tar xf open-tobii-<version>-x86_64.tar.gz`, then `sudo ./install.sh` in it | `sudo /usr/local/share/open-tobii/install.sh --uninstall` |
+| aarch64 (Raspberry Pi 4, …) | no package yet — build from source (§2, §2b); confirmed on Ubuntu Server 24.04 ([#2](https://github.com/Skyggedans/tobii-linux/issues/2)) | `make uninstall` in the checkout |
 
 All need glibc 2.35 or newer, libusb-1.0, libudev and the libstdc++ of GCC 12
 or newer (RHEL 9 is too old), and systemd: logind turns the udev rule into the
@@ -50,8 +51,11 @@ After installing:
   build; nothing from there is needed here). To have it at once:
   `systemctl --user start tobiid.socket`. A client that finds no daemon
   starts one itself anyway;
-- calibrate (§8a): "Tobii Calibration" among the applications, or
-  `tobii-calibrate`;
+- calibrate (§8a), once for each user who wants gaze on the screen (games,
+  applications, gaze-switcher; head pose does not need it): "Tobii
+  Calibration" among the applications, or `tobii-calibrate`; until then a
+  notification at login offers it. Calibrated before 0.4.1, or with
+  `--no-display-setup`? Calibrate again;
 - gaze to arrow keys (§8): join the `input` group, which lets every program
   you run read all keyboards (§3 weighs it), with
   `sudo usermod -aG input "$USER"`, reboot, then
@@ -64,7 +68,8 @@ The `.deb` and `.rpm` install under `/usr` (the library in
 `/usr/lib/x86_64-linux-gnu` or `/usr/lib64`, the rules in
 `/usr/lib/udev/rules.d`, the units in `/usr/lib/systemd/user`); the tarball
 installs under `/usr/local` (the rules in `/etc/udev/rules.d`, plus
-`/etc/ld.so.conf.d/tobii.conf`). Do not mix either with `make install` (§2b):
+`/etc/ld.so.conf.d/tobii.conf`). All of them put the reminder to calibrate
+(§8a) in `/etc/xdg/autostart`. Do not mix either with `make install` (§2b):
 its binaries in `/usr/local/bin` and its units in `~/.config/systemd/user` win
 over a package's. Run `make uninstall` first.
 
@@ -104,7 +109,7 @@ Produces in `target/release/`:
 | `tobii-opentrack` | thin client: the Stream Engine's head pose → OpenTrack UDP | yes |
 | `tobii-gaze-keys` | thin client: gaze at screen edge → Left/Right arrow key; double wink → Super+Left/Right | yes |
 | `tobii-calibrate` | fullscreen calibration (Wayland and X11) | yes |
-| `libtobii.so` | the Stream Engine 4.1 C ABI, all 153 entry points; a daemon client | yes |
+| `libtobii.so` | the Stream Engine 4.25 C ABI, all 199 entry points; a daemon client | yes |
 | `tobii/*.h` | the C headers for `libtobii.so` (`$PREFIX/include/tobii/`) | yes |
 | `tobii5-init-replay` | log analysis, UVC camera and diagnostics | no — run it from `target/release/` |
 
@@ -129,8 +134,9 @@ embedded assets (it is ~0.45 MB rather than ~20 MB).
 | `tobii-tools` | `tobii5-init-replay`: analysis, UVC camera, diagnostics | all of the above |
 
 `make check` runs what CI would: `cargo fmt --all --check`, clippy with
-`-D warnings` over all targets, the tests and `cargo doc`. `make verify-abi`
-asserts `libtobii.so` exports exactly the 153 symbols listed in
+`-D warnings` over all targets, the tests, `cargo doc`, and the checks of
+the udev rules and the `.desktop` files. `make verify-abi` asserts
+`libtobii.so` exports exactly the 199 symbols listed in
 `crates/tobii-ffi/abi-symbols.txt` (the exports of the reference DLL, and
 none of its own), then compiles and runs `crates/tobii-ffi/abi-smoke.c`
 against the headers so the C declarations and the library cannot drift apart.
@@ -142,12 +148,13 @@ prototype against the DLL's machine code (`tools/abi/README.md`).
 The fastest path — installs binaries + `libtobii.so` to `/usr/local` (plus
 `/etc/ld.so.conf.d/tobii.conf`, so the dynamic loader finds the library
 where it does not search `/usr/local/lib` by itself, e.g. Fedora), the udev
-rules, the desktop entry and icon of `tobii-calibrate`, and the systemd
-**user** units (with `ExecStart` rewritten to the installed binary). Run it as
-**your user**; it invokes `sudo` for the system parts itself:
+rules, the desktop entry and icon of `tobii-calibrate` and its reminder's
+autostart entry (in `/etc/xdg/autostart`, §8a), and the systemd **user**
+units (with `ExecStart` rewritten to the installed binary). Run it as **your
+user**; it invokes `sudo` for the system parts itself:
 
 ```bash
-make install      # build + binaries + lib + udev rules + desktop entry + user units
+make install      # build + binaries + lib + udev rules + desktop entries + user units
 make enable       # start the always-on user service now
 ```
 
@@ -345,14 +352,13 @@ pose, and no error:
   `tobii-opentrack` prints one on its stderr.
 - A newer `tobiid` acknowledges the old pose's subscription, from an
   application still running an older `libtobii.so`, from an older
-  `tobii-opentrack`, or from a client with its own copy of the protocol that
-  asks for stream bit 0, such as a `tobii-hub` Flutter plugin from before
-  its commit "plugin: take the head pose from tobiid's HEAD_POSE stream",
-  and never sends it; its log says so, once. Such a client gets no head pose
-  until it is ported to the Stream Engine's, `HEAD_POSE` (bit 9 of the `u32`
-  SUBSCRIBE mask, frames tagged `0x29`; `crates/tobii-ipc/src/lib.rs`),
-  which it centres itself: the daemon ignores the RECENTER frame such a
-  client may send (an older `tobii-hub`'s `recenter()`), logging the first.
+  `tobii-opentrack`, or from a client with its own copy of the protocol,
+  written before `HEAD_POSE`, that asks for stream bit 0, and never sends
+  it; its log says so, once. Such a client gets no head pose until it is
+  ported to the Stream Engine's, `HEAD_POSE` (bit 9 of the `u32` SUBSCRIBE
+  mask, frames tagged `0x29`; `crates/tobii-ipc/src/lib.rs`), which it
+  centres itself: the daemon ignores the RECENTER frame such a client may
+  send, logging the first.
 
 `make install` replaces the binaries, not the daemon that is running nor
 the library an application has loaded: after installing the first build
@@ -502,7 +508,7 @@ output, and its frame is the display area's (`TOBII_DISPLAY_MM` below,
 | `TOBII_NO_IMAGE` | unset | `1` does not start the 0x50e image stream (gaze/presence only; no head pose from the gaze engine) |
 | `TOBII_IMAGE83_DEBUG` | unset | `1` logs the image head-pose worker's statistics every 5 s while a client wants a head pose (an `info` event): the images it made a pose of and the valid poses, per second (`frames_per_s`/`valid_per_s`), the images dropped before it could take them (`overwritten`, 0 when it keeps up), the time per image (`mean_ms`/`p99_ms`/`max_ms`) and the face-detector rate (`detector_runs_per_s`: how often the tracker looked for a lost face) |
 | `RUST_LOG` | `info` | log filter for all binaries (`debug`, `tobii=debug,ort=warn`, …); see §6 |
-| `TOBII_DISPLAY_MM` | unset | your monitor as `<width>x<height>[+<offset_x>]` in mm, e.g. `597x336`: once the tracker reports its mounting, the daemon computes the display area (the Stream Engine's `tobii_calculate_display_area_basic`) and writes it, replacing the capture author's monitor that the init replay configures. Gaze coordinates, and the Stream Engine's head pose, are relative to this area. `offset_x` is how far right of the tracker the screen centre is. Usually unneeded: `tobii-calibrate` sets the display area and the daemon keeps it (§8a); a saved display area wins over this variable, which only fills in while nothing is saved (delete `~/.config/tobii/display-area` to use it). |
+| `TOBII_DISPLAY_MM` | unset | your monitor as `<width>x<height>[+<offset_x>]` in mm, e.g. `597x336`: once the tracker reports its mounting, the daemon computes the display area (the Stream Engine's `tobii_calculate_display_area_basic`) and writes it, replacing the one the init replay configures (633.6 × 334.3 mm, from the Windows capture). Gaze coordinates, and the Stream Engine's head pose, are relative to this area. `offset_x` is how far right of the tracker the screen centre is. Usually unneeded: `tobii-calibrate` sets the display area and the daemon keeps it (§8a); a saved display area wins over this variable, which only fills in while nothing is saved (delete `~/.config/tobii/display-area` to use it). |
 | `TOBII_CALIBRATION` | unset | where the calibration is kept (default `$XDG_CONFIG_HOME/tobii/calibration.bin`), or `embedded` to use the built-in one (§8a) |
 
 Head-pose inference on the image stream runs only while some client subscribes
@@ -557,8 +563,10 @@ TOBII_IMAGE83_DEBUG=1 ./target/release/tobii-opentrack
   `[Service]` an empty `ExecStart=` and `ExecStart=… --host H --port P`.
   Run by hand on a terminal, it shows the pose it sends on one live line.
 - **`libtobii.so`** — the Stream Engine 4.25 C API: every one of the 199
-  entry points of `tobii_stream_engine.dll` 4.25.0.3, with its signatures,
-  `tobii_error_t` numbering and struct layouts, and no others. Headers:
+  entry points of `tobii_stream_engine.dll` 4.25.0.3, and no others, with
+  its signatures, `tobii_error_t` numbering and struct layouts but one
+  (`tobii_hardware_configuration_t` keeps 4.1.0.3's two-entry layout, where
+  4.25.0.3's holds four). Headers:
   `/usr/local/include/tobii/` (`tobii.h`, `tobii_streams.h`,
   `tobii_config.h`, `tobii_licensing.h`, `tobii_advanced.h`,
   `tobii_wearable.h`, `tobii_signing.h`, and `tobii_internal.h` for the
@@ -586,17 +594,26 @@ TOBII_IMAGE83_DEBUG=1 ./target/release/tobii-opentrack
   started as the Stream Engine starts it, `tobii_image_collection_subscribe`;
   the ET5 refuses it, so it answers `TOBII_ERROR_INTERNAL`, as the Stream
   Engine does, and no frame is ever delivered), notifications (display
-  area, calibration, pause, faults and warnings), device info (the public
-  and the internal one, `tobii_get_device_info_internal`), track box,
-  display area (get and set — kept across re-inits and, like the Stream
+  area, calibration, pause, power save, faults and warnings), device info
+  (the public and the internal one, `tobii_get_device_info_internal`), track
+  box, display area (get and set — kept across re-inits and, like the Stream
   Engine, across sessions), mounting, states, capabilities, 2-D calibration
   (discarding a point too), a device/host clock pair (`tobii_timesync`),
   the tracker's stream catalogue (`tobii_enumerate_stream_types`) and its
   streams' columns (`tobii_enumerate_stream_type_columns`), internal-stream
   support (the IR image, and the custom stream and image collection while
   that catalogue lists them, as the Stream Engine answers for an ET5,
-  `tobii_internal_stream_supported`), pause and resume, and the device
-  name. `tobii_hardware_configuration_get` is provisional: the ET5 has
+  `tobii_internal_stream_supported`), pause and resume, power save (entered
+  and left, with its state and remote wake's), the tracker's extension lists
+  (empty on an ET5), the device name, whether the tracker reports gaze over
+  HID and the track box it reports it in, and an application's own command
+  to the tracker (`tobii_send_custom_command`). Of the forty-six entry
+  points Stream Engine 4.25 adds, seventeen give real answers too: the fault
+  and warning lists and their streams, 4.25's presence stream, the
+  responsive gaze point (the tracker's own unfiltered point, key `0x20`),
+  the output-frequency stream, whether the extended lens configuration can be
+  written (never), and the four signing calls.
+  `tobii_hardware_configuration_get` is provisional: the ET5 has
   reported no hardware configuration on Linux, so it returns
   `TOBII_ERROR_NOT_SUPPORTED`.
   Timestamps are the host clock `tobii_system_clock` reads (`CLOCK_MONOTONIC`),
@@ -605,11 +622,15 @@ TOBII_IMAGE83_DEBUG=1 ./target/release/tobii-opentrack
   "Timestamps"); gaze data and `tobii_timesync` keep the tracker's time too,
   and raw gaze has only the tracker's time, though the daemon sends the
   host time beside it for the foveated rendering gaze point made from it.
-  Everything the ET5 was never observed doing (wearable, face id,
-  illumination, power, firmware, diagnostics, licence storage on the device,
-  3-D and per-eye calibration, calibration stimulus points, the internal
-  low-frequency head, multiple faces, wearable limited image and secondary
-  camera image streams) returns `TOBII_ERROR_NOT_SUPPORTED`. For the wearable
+  What the ET5 refuses (remote wake, reading and listing the illumination
+  modes, the configuration key, the diagnostics image, retrieving its
+  diagnostic images or logs, the display id) and everything it was never
+  observed doing (wearable, face id, firmware, licence storage on the
+  device, 3-D and per-eye calibration, calibration stimulus points, the
+  internal low-frequency head, multiple faces, wearable limited image and
+  secondary camera image streams) return `TOBII_ERROR_NOT_SUPPORTED`, and so
+  do the other twenty-nine entry points 4.25 adds (docs/stream-engine-api.md,
+  *What 4.25 added*, says what each answers). For the wearable
   entry points, the digital sync port, face id, 3-D and per-eye calibration,
   the stimulus points and those five streams that is the Stream Engine's own
   answer without Tobii's service, for a tracker it drives itself through its
@@ -618,10 +639,15 @@ TOBII_IMAGE83_DEBUG=1 ./target/release/tobii-opentrack
   `TOBII_ERROR_CALIBRATION_NOT_STARTED` outside it); its answer behind the
   service was never captured. For the face types, which the Stream Engine asks
   the tracker for, and licence storage, which it offers a tracker with
-  persistent storage, it is inferred. Usage statistics
-  (`tobii_send_statistics`) answer `TOBII_ERROR_NOT_AVAILABLE`, as the Stream
-  Engine does without Tobii's Stream Engine Services. No licence is checked:
-  what the Stream Engine reserves for its professional, config or internal
+  persistent storage, it is inferred. Seven entry points keep the Stream
+  Engine's refusal of a consumer ET5, `TOBII_ERROR_INSUFFICIENT_LICENSE`,
+  which it gives without asking the tracker: setting the illumination mode,
+  enabling an extension, clean IR's subscribe and unsubscribe, dumping the
+  diagnostic images, reading diagnostics data and opening a realm. Usage
+  statistics (`tobii_send_statistics`) and reading the display info answer
+  `TOBII_ERROR_NOT_AVAILABLE`, as the Stream Engine does without Tobii's
+  Stream Engine Services. Beyond those seven, no licence is checked: what
+  the Stream Engine reserves for its professional, config or internal
   feature groups, or for an additional-features licence (the IR image), works
   too. Raw gaze is one such: the Stream Engine serves it only to its internal
   feature group, and only without Tobii's service (for any URL, libtobii's
@@ -846,7 +872,7 @@ TOBII_IMAGE83_DEBUG=1 ./target/release/tobii-opentrack
   validity, saves the first frames as PGM; `--pose` makes the Stream Engine's
   head pose of every image as the daemon does, but without it, which is handy
   for isolating issues, in the display area the init capture writes: the
-  author's monitor for the shipped `init_packets_ep.txt`, not yours;
+  633.6 × 334.3 mm one the shipped `init_packets_ep.txt` carries, not yours;
   `--no-image` is the gaze-only baseline),
   `… image83-replay <log.bin> [--csv out.csv] [--fits fits.csv]
   [--landmarks landmarks.f32]` (runs the tracker over a logged capture;
@@ -862,14 +888,47 @@ TOBII_IMAGE83_DEBUG=1 ./target/release/tobii-opentrack
 
 ### 8a. Calibration
 
-The tracker needs calibrating once per user. Until then it runs on the
-calibration embedded in the init capture, which is the author's, and on the
-author's monitor.
+The tracker needs calibrating once per user, on the monitor it is mounted
+on. Until then it runs on the tracker's own power-up default (id 0), which
+the init capture uploads, and on the display area that capture carries:
+633.6 × 334.3 mm (a 28.2" screen, wider than 16:9), whatever your monitor
+is. The tracker scales gaze to its display area itself, so the area alone
+puts gaze off on any other screen: looking at the left and right edges of a
+24" 16:9 monitor reads about 0.08 and 0.92 instead of 0 and 1, of a 34" 21:9
+one about −0.13 and 1.13; the coarse default adds an error of its own
+everywhere.
+
+What needs it: whatever puts gaze on the screen — games and applications
+reading gaze through `libtobii.so`, gaze-switcher, and `tobii-gaze-keys`'
+winks near the edges of a wide monitor (a wink only counts with gaze on the
+screen). What does not: head pose (the display area only shifts it, and
+OpenTrack's centring takes that away), user presence, and `tobii-gaze-keys`'
+arrows, which learn your gaze range themselves.
+
+A calibration made with `--no-display-setup`, or before 0.4.1 (whose display
+setup never succeeded), was made on whatever area the tracker had, usually
+the capture's: calibrate again, with the display setup.
+
+Until you calibrate, the daemon's journal says so each time it starts the
+tracker, in two warnings: `calibration: the built-in one, the tracker's
+power-up default (id 0): coarse` and `display area: the init capture's, not
+your monitor's`. `tobii-calibrate --status` (below) says the same without
+the journal.
 
 ```bash
-tobii-calibrate --list-monitors         # which monitor is the tracker on?
-tobii-calibrate --monitor 0             # display setup, then 14 points; Esc cancels
+tobii-calibrate                         # display setup, then 14 points; Esc cancels
+tobii-calibrate --list-monitors         # the monitors, and which one it opens on
+tobii-calibrate --monitor 1             # on that one
 ```
+
+Without `--monitor` it opens on the monitor the last calibration was made
+on (kept in `~/.config/tobii/calibration-monitor`), else on the one whose
+size, from its EDID, is the saved display area's, else on the primary
+monitor — on Wayland, which names none to programs, the first one
+`--list-monitors` lists. If the tracker is not on that monitor, press Tab
+(Shift+Tab: back) on the first screens: the window moves to the next
+monitor, and the display setup starts again there. Once the setup is
+answered, the calibration belongs to its monitor and Tab no longer moves it.
 
 First the display setup: two white ticks at the bottom edge of the screen,
 to be lined up with the two white marks on the tracker's front (drag them,
@@ -921,6 +980,32 @@ takes more than a second), and if it has not finished by then, says
 whether the daemon still saves the calibration (the save was under way;
 `--export` then writes nothing) or discards it.
 
+- `--status` says what the tracker runs on: your calibration or the built-in
+  one, your display area or the built-in 633.6 × 334.3 mm, and whether the
+  tracker is plugged in, then what, if anything, to do about it (calibrate;
+  calibrate again with the display setup; calibrate again because the
+  display area changed since). It reads the files tobiid reads, in the
+  environment systemd gives tobiid (the user manager's, and
+  `Environment=` lines from `systemctl --user edit tobiid`), and says so
+  when your shell has `TOBII_CALIBRATION` or `TOBII_DISPLAY_MM` and tobiid
+  does not. It starts no daemon and opens no tracker.
+- `--remind` is what the desktop runs at every login
+  (`/etc/xdg/autostart/tobii-calibrate-remind.desktop`). With the tracker
+  plugged in and no calibration of yours, or one but no display area saved
+  (made with `--no-display-setup`, or before 0.4.1), it waits 20 s for the
+  desktop and then shows a notification, in English or Russian as the
+  locale says: *Calibrate* (or a click on the notification) starts the
+  calibration, *Don't remind me* stops the reminders for good. Each of the
+  two reasons comes at most three times: at the first login, a day later,
+  a week after that. It needs `notify-send` with buttons (libnotify 0.7.10
+  or later, `libnotify-bin` on Debian and Ubuntu); an older one, or
+  `busctl` without it, shows the text without buttons. It stays quiet in a
+  greeter's or other non-user session, and while tobiid gets
+  `TOBII_CALIBRATION`; a `TOBII_DISPLAY_MM` that tobiid gets counts as a
+  display area. What it has shown is kept in `~/.config/tobii/reminders`: delete the
+  file to be reminded again. To turn it off for one user without the button,
+  give them a copy with `Hidden=true` in `~/.config/autostart/`; for every
+  user, delete the system file (a package upgrade may bring it back).
 - `--rounds 1` for a quick 7-point pass (half the tracker's 14 stored points
   stay from the previous calibration); `--dwell-ms` to linger longer per point.
 - `--reset` goes back to the built-in calibration; or delete the file, or set
