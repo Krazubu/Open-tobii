@@ -81,8 +81,37 @@ static bool i2c_write(uint8_t addr, const uint8_t *data, size_t len) {
     return true;
 }
 
+static void led_init(void) {
+    RCC_AHB1ENR |= RCC_AHB1ENR_GPIOCEN;
+    GPIOC_MODER &= ~(3u << (13 * 2));
+    GPIOC_MODER |= (1u << (13 * 2)); /* output */
+    GPIOC_BSRR = LED_OFF;
+}
+static void led(bool on) { GPIOC_BSRR = on ? LED_ON : LED_OFF; }
+static void blink(int times, uint32_t on_ms, uint32_t off_ms) {
+    for (int i = 0; i < times; i++) {
+        led(true);
+        delay(on_ms * 1600); /* ~1600 nop/ms at 16 MHz, rough */
+        led(false);
+        delay(off_ms * 1600);
+    }
+}
+
 int main(void) {
+    led_init();
+    blink(3, 120, 120); /* firmware-alive proof */
+
     gpio_i2c_init();
+
+    /* Probe the OLED: does it ACK on the bus? (display-off command) */
+    static const uint8_t probe[] = {0x00, 0xAE};
+    if (!i2c_write(OPEN_TOBII_OLED_I2C_ADDR, probe, sizeof probe)) {
+        /* No ACK -> I2C/wiring/address problem. Fast blink forever. */
+        for (;;) blink(1, 60, 60);
+    }
+    /* I2C OK: steady LED on while we drive the panel. If the screen stays dark
+     * now, it is the panel init / VCC (SSD1309 charge pump), not the bus. */
+    led(true);
 
     static struct ssd1306 oled;
     ssd1306_init(&oled, i2c_write, OPEN_TOBII_OLED_I2C_ADDR);

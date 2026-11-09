@@ -11,7 +11,15 @@
 #define RCC_AHB1ENR REG(RCC_BASE + 0x30u)
 #define RCC_APB1ENR REG(RCC_BASE + 0x40u)
 #define RCC_AHB1ENR_GPIOBEN (1u << 1)
+#define RCC_AHB1ENR_GPIOCEN (1u << 2)
 #define RCC_APB1ENR_I2C1EN (1u << 21)
+
+/* GPIOC (onboard LED PC13 on the WeAct Black Pill, active low) */
+#define GPIOC_BASE 0x40020800u
+#define GPIOC_MODER REG(GPIOC_BASE + 0x00u)
+#define GPIOC_BSRR REG(GPIOC_BASE + 0x18u)
+#define LED_ON (1u << (13 + 16)) /* BSRR reset PC13 -> LED on (active low) */
+#define LED_OFF (1u << 13)       /* BSRR set PC13 -> LED off */
 
 /* GPIOB */
 #define GPIOB_BASE 0x40020400u
