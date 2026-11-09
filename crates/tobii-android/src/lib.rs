@@ -8,6 +8,11 @@
 //! store that [`latestGaze`] reads back. The Kotlin side is expected to
 //! poll it on a timer.
 
+// A proof of concept: the workspace's strict restriction lints are relaxed
+// here. The in-process Mutexes `unwrap` their locks (a poisoned lock is not
+// recoverable in a single-process PoC), and the panic paths are the PoC's own.
+#![allow(clippy::unwrap_used, clippy::missing_panics_doc)]
+
 mod calibration;
 
 use std::sync::{Mutex, OnceLock};
