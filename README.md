@@ -1,7 +1,7 @@
-# tobii-linux
+# open-tobii
 
-[![ci](https://github.com/Skyggedans/tobii-linux/actions/workflows/ci.yml/badge.svg)](https://github.com/Skyggedans/tobii-linux/actions/workflows/ci.yml)
-[![latest release](https://img.shields.io/github/v/release/Skyggedans/tobii-linux?label=release)](https://github.com/Skyggedans/tobii-linux/releases/latest)
+[![ci](https://github.com/Krazubu/Open-tobii/actions/workflows/ci.yml/badge.svg)](https://github.com/Krazubu/Open-tobii/actions/workflows/ci.yml)
+[![latest release](https://img.shields.io/github/v/release/Krazubu/Open-tobii?label=release)](https://github.com/Krazubu/Open-tobii/releases/latest)
 [![licence: MIT](https://img.shields.io/badge/licence-MIT-blue.svg)](LICENSE)
 
 ![A Tobii Eye Tracker 5 on a mount at the bottom edge of a monitor](docs/images/tobii-eye-tracker-5.jpg)
@@ -21,11 +21,11 @@ from USB captures of the Windows Stream Engine.
 > Status: works daily on the author's desk. Independently reimplemented from
 > USB captures; not affiliated with or endorsed by Tobii.
 
-**Install** the latest [release](https://github.com/Skyggedans/tobii-linux/releases/latest)
+**Install** the latest [release](https://github.com/Krazubu/Open-tobii/releases/latest)
 — `.deb`, `.rpm` or tarball — then plug the tracker in:
 
 ```sh
-sudo dnf install ./tobii-linux-*.x86_64.rpm   # or: sudo apt install ./tobii-linux_*_amd64.deb
+sudo dnf install ./open-tobii-*.x86_64.rpm   # or: sudo apt install ./open-tobii_*_amd64.deb
 tobii-calibrate                               # calibrate once; it starts the daemon itself
 ```
 
@@ -94,7 +94,7 @@ themselves; the tooling for it is in `tobii-tools`.
 
 ## Quick start
 
-Each [release](https://github.com/Skyggedans/tobii-linux/releases) carries
+Each [release](https://github.com/Krazubu/Open-tobii/releases) carries
 ready-made packages for x86_64: a `.deb` (Debian 12, Ubuntu 22.04 and newer),
 an `.rpm` (Fedora, openSUSE) and a tar.gz with an `install.sh` for any other
 distribution with systemd and glibc 2.35 or newer (INSTALL.md §0). They install the

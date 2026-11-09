@@ -6,7 +6,7 @@
 # Only the files are listed, and the directories that are the package's
 # alone: a package that also claimed /usr/bin, say, would conflict with the
 # one that owns it (on Fedora its mode differs).
-name: tobii-linux
+name: open-tobii
 arch: amd64
 platform: linux
 version: ${VERSION}
@@ -14,7 +14,7 @@ release: 1
 section: misc
 priority: optional
 maintainer: Andrii Klaptsov <skyggedanser@gmail.com>
-homepage: https://github.com/Skyggedans/tobii-linux
+homepage: https://github.com/Krazubu/Open-tobii
 license: MIT AND Apache-2.0
 description: |-
   Linux driver for the Tobii Eye Tracker 5
@@ -85,11 +85,11 @@ contents:
     dst: /usr/share/icons/hicolor/scalable/apps/tobii-calibrate.svg
   # The documentation and licences as staged, whatever `make stage` puts
   # there; the .deb adds the copyright file Debian wants.
-  - src: target/package/stage/pkg/usr/share/doc/tobii-linux/
-    dst: /usr/share/doc/tobii-linux/
+  - src: target/package/stage/pkg/usr/share/doc/open-tobii/
+    dst: /usr/share/doc/open-tobii/
     type: tree
   - src: target/package/stage/deb-copyright
-    dst: /usr/share/doc/tobii-linux/copyright
+    dst: /usr/share/doc/open-tobii/copyright
     packager: deb
 
 scripts:

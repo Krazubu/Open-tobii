@@ -1,6 +1,6 @@
 post_install() {
   cat <<'MSG'
-tobii-linux is installed. Plug the tracker in, then:
+open-tobii is installed. Plug the tracker in, then:
 
   tobii-calibrate            calibrate once; it starts the daemon itself
 
@@ -13,7 +13,7 @@ Opt-in, each one `systemctl --user enable --now`:
 The udev rules land in /etc/udev/rules.d. They take effect for a tracker
 plugged in after `udevadm control --reload`; re-plug it otherwise.
 
-/usr/share/doc/tobii-linux/INSTALL.md has the rest.
+/usr/share/doc/open-tobii/INSTALL.md has the rest.
 MSG
 }
 

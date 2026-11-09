@@ -47,17 +47,6 @@ jobs:
       - name: Build the packages
         run: make package CONTAINER=docker
 
-      # Brand the release files open-tobii. Only the file names change; the
-      # package's own identity stays `tobii-linux` (the apt/dnf name, the AUR
-      # recipe and the systemd units), so installs and upgrades are untouched.
-      - name: Name the Linux files open-tobii
-        run: |
-          set -euo pipefail
-          cd dist
-          for f in tobii-linux*; do [ -e "$f" ] && mv "$f" "${f/tobii-linux/open-tobii}"; done
-          rm -f SHA256SUMS
-          sha256sum open-tobii* > SHA256SUMS
-
       - name: Keep the packages
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

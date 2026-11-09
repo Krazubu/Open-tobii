@@ -1,6 +1,6 @@
 [Unit]
 Description=Tobii head pose to OpenTrack (its "UDP over network" input, port 4242)
-Documentation=https://github.com/Skyggedans/tobii-linux
+Documentation=https://github.com/Krazubu/Open-tobii
 # A thin client of the daemon, like the gaze-to-keyboard binder: Requires=
 # ties their lifecycles together (daemon stopped or restarted → this too);
 # After= orders startup.

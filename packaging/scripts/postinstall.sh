@@ -1,5 +1,5 @@
 #!/bin/sh
-# After tobii-linux is installed or upgraded. dpkg passes "configure", rpm
+# After open-tobii is installed or upgraded. dpkg passes "configure", rpm
 # the number of versions now installed; either way the same steps follow.
 # None of them may fail the install: in a container or a chroot there is no
 # udev or systemd to talk to.
@@ -23,9 +23,9 @@ fi
 # user: from their next login, a client's first connect starts tobiid. An
 # upgrade leaves it enabled or disabled, as it was.
 fresh=
-if [ -e /run/tobii-linux-fresh-install ]; then
+if [ -e /run/open-tobii-fresh-install ]; then
 	fresh=yes
-	rm -f /run/tobii-linux-fresh-install
+	rm -f /run/open-tobii-fresh-install
 fi
 case "$1" in
 	configure) [ -n "${2:-}" ] || fresh=yes ;;
@@ -43,7 +43,7 @@ fi
 
 cat << 'EOF'
 
-tobii-linux:
+open-tobii:
   - re-plug the tracker if it is connected;
   - tobiid starts on demand from your next login, or now after
       systemctl --user start tobiid.socket
@@ -57,11 +57,11 @@ tobii-linux:
   - after an upgrade, restart a running daemon:  systemctl --user restart tobiid
 
 EOF
-if [ -f /usr/local/share/tobii-linux/installed-files ]; then
+if [ -f /usr/local/share/open-tobii/installed-files ]; then
 	cat << 'EOF'
-warning: tobii-linux is installed from its tarball too, under /usr/local,
+warning: open-tobii is installed from its tarball too, under /usr/local,
   whose programs and units come first; remove that one:
-    sudo /usr/local/share/tobii-linux/install.sh --uninstall
+    sudo /usr/local/share/open-tobii/install.sh --uninstall
 
 EOF
 fi

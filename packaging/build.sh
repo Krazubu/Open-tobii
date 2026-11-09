@@ -21,7 +21,7 @@ export CARGO_HOME="$CARGO_TARGET_DIR/cargo-home"
 export XDG_CACHE_HOME="$CARGO_TARGET_DIR/cache"
 STAGE=$CARGO_TARGET_DIR/stage
 DIST=$PWD/dist
-TARDIR=tobii-linux-$VERSION-x86_64
+TARDIR=open-tobii-$VERSION-x86_64
 mkdir -p "$CARGO_TARGET_DIR"
 
 # onnxruntime calls glibc 2.38's C23 strto*: see compat/isoc23.c.
@@ -44,9 +44,9 @@ desktop-file-validate "$STAGE/pkg/usr/share/applications/tobii-calibrate.desktop
 
 # Debian wants a copyright file, and a minimized Ubuntu keeps nothing else
 # under /usr/share/doc: every licence and notice, in one file, for the .deb.
-doc=$STAGE/pkg/usr/share/doc/tobii-linux
+doc=$STAGE/pkg/usr/share/doc/open-tobii
 {
-	echo "tobii-linux $VERSION, https://github.com/Skyggedans/tobii-linux"
+	echo "open-tobii $VERSION, https://github.com/Krazubu/Open-tobii"
 	echo
 	cat "$doc/LICENSE"
 	for f in models/LICENSE models/NOTICE onnxruntime/LICENSE onnxruntime/ThirdPartyNotices.txt \

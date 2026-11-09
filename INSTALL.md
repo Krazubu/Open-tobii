@@ -23,17 +23,17 @@ only in the standalone research subcommands (`camera`, `probe`).
 
 ## 0. Ready-made packages (no build needed)
 
-Each [release](https://github.com/Skyggedans/tobii-linux/releases) carries,
+Each [release](https://github.com/Krazubu/Open-tobii/releases) carries,
 for x86_64, the daemon, `libtobii.so` and its headers, `tobii-calibrate`
 ("Tobii Calibration" among the desktop's applications), `tobii-opentrack`,
 `tobii-gaze-keys`, the udev rules (§3) and the user units (§4):
 
 | System | Install | Remove |
 |---|---|---|
-| Debian 12, Ubuntu 22.04, Mint 21 and newer | `sudo apt install ./tobii-linux_<version>-1_amd64.deb` | `sudo apt remove tobii-linux` |
-| Fedora 36+, RHEL/Alma/Rocky 10 | `sudo dnf install ./tobii-linux-<version>-1.x86_64.rpm` | `sudo dnf remove tobii-linux` |
-| openSUSE Tumbleweed, Leap 16 | `sudo zypper install --allow-unsigned-rpm ./tobii-linux-<version>-1.x86_64.rpm` | `sudo zypper remove tobii-linux` |
-| any other with systemd and glibc 2.35+ (Arch, …) | `tar xf tobii-linux-<version>-x86_64.tar.gz`, then `sudo ./install.sh` in it | `sudo /usr/local/share/tobii-linux/install.sh --uninstall` |
+| Debian 12, Ubuntu 22.04, Mint 21 and newer | `sudo apt install ./open-tobii_<version>-1_amd64.deb` | `sudo apt remove open-tobii` |
+| Fedora 36+, RHEL/Alma/Rocky 10 | `sudo dnf install ./open-tobii-<version>-1.x86_64.rpm` | `sudo dnf remove open-tobii` |
+| openSUSE Tumbleweed, Leap 16 | `sudo zypper install --allow-unsigned-rpm ./open-tobii-<version>-1.x86_64.rpm` | `sudo zypper remove open-tobii` |
+| any other with systemd and glibc 2.35+ (Arch, …) | `tar xf open-tobii-<version>-x86_64.tar.gz`, then `sudo ./install.sh` in it | `sudo /usr/local/share/open-tobii/install.sh --uninstall` |
 
 All need glibc 2.35 or newer, libusb-1.0, libudev and the libstdc++ of GCC 12
 or newer (RHEL 9 is too old), and systemd: logind turns the udev rule into the

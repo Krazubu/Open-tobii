@@ -15,7 +15,7 @@ BINDIR      ?= $(PREFIX)/bin
 LIBDIR      ?= $(PREFIX)/lib
 INCLUDEDIR  ?= $(PREFIX)/include
 DATADIR     ?= $(PREFIX)/share
-DOCDIR      ?= $(DATADIR)/doc/tobii-linux
+DOCDIR      ?= $(DATADIR)/doc/open-tobii
 UDEVDIR     ?= /etc/udev/rules.d
 # The dynamic loader does not search /usr/local/lib everywhere (Fedora, for
 # one): a Stream Engine client linked with -ltobii would not start. This
@@ -33,7 +33,7 @@ CARGO_FLAGS ?=
 # with SELinux labels off: where SELinux enforces, the tree it mounts would
 # otherwise need relabelling.
 CONTAINER   ?= podman
-PKG_IMAGE   := tobii-linux-build
+PKG_IMAGE   := open-tobii-build
 ifeq ($(CONTAINER),podman)
 PKG_RUN     := --userns=keep-id --security-opt label=disable
 else

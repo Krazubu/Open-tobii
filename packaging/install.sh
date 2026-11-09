@@ -1,9 +1,9 @@
 #!/bin/sh
-# Installs tobii-linux @VERSION@ from this unpacked tarball under /usr/local,
+# Installs open-tobii @VERSION@ from this unpacked tarball under /usr/local,
 # where no package manager puts files, and removes it again:
 #
 #     sudo ./install.sh
-#     sudo /usr/local/share/tobii-linux/install.sh --uninstall
+#     sudo /usr/local/share/open-tobii/install.sh --uninstall
 #
 # Running it again over an earlier install replaces that one. On Debian,
 # Ubuntu, Fedora or openSUSE the .deb or .rpm installs the same, and lets the
@@ -14,7 +14,7 @@ umask 022
 VERSION=@VERSION@
 # The binaries were built against this glibc and need it, or a newer one.
 GLIBC_MIN=@GLIBC_MAX@
-SHARE=/usr/local/share/tobii-linux
+SHARE=/usr/local/share/open-tobii
 MANIFEST=$SHARE/installed-files
 # The directories it made, deepest first: removed again once empty.
 DIRS=$SHARE/created-dirs
@@ -91,12 +91,12 @@ remove_files() {
 	fi
 }
 
-# "deb" or "rpm" when tobii-linux is installed as that package, else nothing.
+# "deb" or "rpm" when open-tobii is installed as that package, else nothing.
 package_installed() {
 	if command -v dpkg-query > /dev/null 2>&1 \
-		&& dpkg-query -W -f '${Status}' tobii-linux 2> /dev/null | grep -q 'ok installed'; then
+		&& dpkg-query -W -f '${Status}' open-tobii 2> /dev/null | grep -q 'ok installed'; then
 		echo deb
-	elif command -v rpm > /dev/null 2>&1 && rpm -q tobii-linux > /dev/null 2>&1; then
+	elif command -v rpm > /dev/null 2>&1 && rpm -q open-tobii > /dev/null 2>&1; then
 		echo rpm
 	fi
 }
@@ -123,7 +123,7 @@ uninstall() {
 	if [ -n "$enabled" ]; then
 		systemctl --global reenable tobiid.socket 2> /dev/null || true
 	fi
-	echo "tobii-linux removed. A daemon still running stops at logout, or now with"
+	echo "open-tobii removed. A daemon still running stops at logout, or now with"
 	echo "  systemctl --user stop 'tobii*'; pkill -x tobiid"
 }
 
@@ -146,7 +146,7 @@ $missing
 install libusb-1.0 and libudev (and a newer libstdc++ if it is named), then run this again"
 
 	pkg=$(package_installed)
-	[ -z "$pkg" ] || die "tobii-linux is installed as a package ($pkg): upgrade or remove that instead"
+	[ -z "$pkg" ] || die "open-tobii is installed as a package ($pkg): upgrade or remove that instead"
 
 	list=$(mktemp)
 	dirs=$(mktemp)
@@ -159,7 +159,7 @@ install libusb-1.0 and libudev (and a newer libstdc++ if it is named), then run 
 
 	fresh=yes
 	if [ -f "$MANIFEST" ]; then
-		echo "replacing the tobii-linux installed before"
+		echo "replacing the open-tobii installed before"
 		remove_files
 		fresh=
 	fi
@@ -217,7 +217,7 @@ EOF
 	fi
 
 	cat << EOF
-tobii-linux $VERSION installed under /usr/local.
+open-tobii $VERSION installed under /usr/local.
   - re-plug the tracker if it is connected;
   - tobiid starts on demand from your next login, or now after
       systemctl --user start tobiid.socket
