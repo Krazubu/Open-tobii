@@ -6,11 +6,25 @@
  * default (config.h). See README.md for the design and milestones.
  */
 #include "config.h"
+#include "tobii_calib.h"
 #include "tobii_host.h"
 #include "tobii_init.h" /* generated: tools/gen_init_packets.py */
 #include "tobii_proto.h"
 
 #include <stdio.h>
+
+/* Default calibration stimulus points (display-normalised), centre + corners.
+ * The user must fixate each in turn while it is shown; see README on the
+ * stimulus-surface limitation of the tiny OLED. */
+static const struct tobii_cal_point cal_points[] = {
+    {0.5f, 0.5f}, {0.1f, 0.1f}, {0.9f, 0.1f}, {0.9f, 0.9f}, {0.1f, 0.9f},
+};
+#define CAL_POINT_COUNT (sizeof cal_points / sizeof cal_points[0])
+
+/* How long each point is shown before its sample is collected. */
+#ifndef OPEN_TOBII_CAL_FIXATION_MS
+#define OPEN_TOBII_CAL_FIXATION_MS 1500u
+#endif
 
 /* One bulk IN frame. The gaze (0x500) message is small; the image stream is
  * not read, so a few KB is plenty on 128 KB of SRAM. */
@@ -52,6 +66,11 @@ int main(void) {
 
     uint8_t frame[FRAME_BUF];
     for (;;) {
+        /* A button press launches a calibration. */
+        if (tobii_button_pressed()) {
+            tobii_calib_run(cal_points, CAL_POINT_COUNT, OPEN_TOBII_CAL_FIXATION_MS);
+        }
+
         int n = tobii_host_bulk_in(frame, sizeof frame, 1000);
         if (n <= 0) continue;
 

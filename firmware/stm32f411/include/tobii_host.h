@@ -30,6 +30,13 @@ int tobii_host_bulk_in(uint8_t *buf, size_t cap, uint32_t timeout_ms);
 /* Debug console (UART or USB-CDC). */
 void tobii_log(const char *msg);
 
+/* Busy/sleep for `ms` milliseconds. */
+void tobii_host_delay_ms(uint32_t ms);
+
+/* The user button (the board's BOOT/user key). Returns true once per press
+ * (debounced, edge-detected) so a held button calibrates only once. */
+bool tobii_button_pressed(void);
+
 #if OPEN_TOBII_ENABLE_DISPLAY
 /* SSD1306 OLED, built only when the display option is on. */
 void tobii_display_init(void);

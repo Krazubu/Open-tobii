@@ -86,6 +86,26 @@ firmware pushed to the repo builds without it (and without the display driver):
 With it off, the firmware still enumerates, streams and decodes gaze (reported
 over the debug UART / USB-CDC console); with it on, it also draws the dot.
 
+## Calibration (button)
+
+A press on the board's user button launches a calibration (`main.c` →
+`tobii_calib_run`): the device runs the TTP calibration sequence — START,
+CLEAR, COLLECT at each stimulus point while the user fixates it, COMPUTE, STOP
+(ids ported from `crates/tobii-proto/src/calibration.rs`; the gaze point of a
+collect is `x, y` as 32.32 fixed plus the eye mask). The default is a 5-point
+set (centre + corners) with a per-point fixation delay.
+
+Two things to settle on hardware:
+
+- **Stimulus surface.** A real multi-point calibration needs the user to fixate
+  points across their actual field of view; the 0.42" OLED is too small to be
+  that surface. Options: show the points on it anyway (crude), drive an external
+  display, or do a single centre point (a coarse re-centre). This is a design
+  choice, left configurable (`cal_points` in `main.c`).
+- **Apply step.** Whether the device applies on COMPUTE or needs the computed
+  blob READ (1100) then WRITTEN back (1110) is marked TODO in `tobii_calib.c` —
+  validate against `crates/tobiid/src/calibration.rs`.
+
 ## Build
 
 Not wired to a build system yet. Intended: an STM32CubeIDE / CubeMX project (or
@@ -106,5 +126,7 @@ cc -I include -o /tmp/t src/tobii_proto.c tools/test_decode.c && /tmp/t   # TODO
 4. Replay the init (embedded from `init_packets_ep.txt`) and read EP `0x83`.
 5. Decode `0x500`, print gaze over the console — **proves FS gaze works.**
 6. SSD1306 driver + the gaze dot (behind `OPEN_TOBII_ENABLE_DISPLAY`).
+7. Button → `tobii_calib_run`: validate the calibration sequence and the apply
+   step on hardware; settle the stimulus surface.
 
 Milestone 3/5 is the go/no-go for the Full-Speed bet.
