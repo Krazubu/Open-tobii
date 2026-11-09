@@ -14,7 +14,7 @@ tobii-calib.workspace = true
 tobii-ipc.workspace = true
 tobii-log.workspace = true
 tobii-proto.workspace = true
-tobii-usb = { workspace = true, default-features = false }
+tobii-usb = { workspace = true }
 tracing.workspace = true
 
 [features]
