@@ -67,12 +67,18 @@ TOBII_API tobii_error_t TOBII_CALL tobii_gaze_point_subscribe( tobii_device_t* d
     tobii_gaze_point_callback_t callback, void* user_data );
 TOBII_API tobii_error_t TOBII_CALL tobii_gaze_point_unsubscribe( tobii_device_t* device );
 
-/* The responsive combined gaze point, TOBII_STREAM_RESPONSIVE_GAZE_POINT,
- * added in Stream Engine 4.25: the tracker's own less filtered combined
- * point, which it sends beside the one tobii_gaze_point_subscribe delivers
- * (stream 0x83 key 0x20). Same shape as tobii_gaze_point_t: the timestamp is
- * on the tobii_system_clock clock, the position is normalised display
- * coordinates and unclamped. */
+/* The responsive combined gaze point, tobii_stream_t 12, added in Stream
+ * Engine 4.25 for the tracker's own unfiltered combined point, which an ET5
+ * sends beside the filtered one tobii_gaze_point_subscribe delivers (stream
+ * 0x83 key 0x20 with validity 0x1f, inferred from the names; for a tracker it
+ * drives itself the DLL most likely refuses the subscribe, its legacy-TTP
+ * module handing PRP stream 0x1d to a not-supported stub). libtobii.so hands
+ * out that point: tobiid reads it from every gaze frame and carries it, with
+ * the frame's host time, in the tail of its raw gaze record. It is valid only
+ * while the tracker's validity word is 1, as the gaze point is. A tobiid too
+ * old to carry the point feeds it nothing. Same shape as tobii_gaze_point_t:
+ * the timestamp is on the tobii_system_clock clock, the position is
+ * normalised display coordinates and unclamped. */
 typedef struct tobii_responsive_gaze_point_t
 {
     int64_t timestamp_us;
@@ -137,7 +143,8 @@ typedef void ( *tobii_user_presence_callback_t )( tobii_user_presence_status_t s
     int64_t timestamp_us, void* user_data );
 
 /* Reported once on subscribe (the last known state, with the time it was
- * last reported; not while paused) and then on change. */
+ * last reported; not while paused, nor while tobii_presence_subscribe below
+ * already holds presence on the device) and then on change. */
 TOBII_API tobii_error_t TOBII_CALL tobii_user_presence_subscribe( tobii_device_t* device,
     tobii_user_presence_callback_t callback, void* user_data );
 TOBII_API tobii_error_t TOBII_CALL tobii_user_presence_unsubscribe( tobii_device_t* device );
@@ -146,8 +153,10 @@ TOBII_API tobii_error_t TOBII_CALL tobii_user_presence_unsubscribe( tobii_device
  * of two arguments, read there from PRP property 0x14 rather than a stream.
  * tobii_presence_status_t numbers its values as tobii_user_presence_status_t
  * does. Both streams are fed from the same presence here, so a subscriber to
- * either sees the same changes. The current Tobii reference marks this pair
- * deprecated. */
+ * either sees the same changes; a subscribe to one while the other is
+ * subscribed on the device is not told the last known state, which the
+ * daemon sends only to a device newly asking for presence. The current Tobii
+ * reference marks this pair deprecated. */
 typedef tobii_user_presence_status_t tobii_presence_status_t;
 
 typedef struct tobii_presence_t

@@ -22,7 +22,7 @@ tobii-ipc.workspace = true
 tobii-log.workspace = true
 tobii-pose.workspace = true
 tobii-proto.workspace = true
-tobii-usb.workspace = true
+tobii-usb = { workspace = true, features = ["head-pose"] }
 tracing.workspace = true
 
 [lints]

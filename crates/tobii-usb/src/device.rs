@@ -44,20 +44,17 @@ use tobii_proto::protocol::{
     stream_stop_packet, ttp_error,
 };
 
-/// USB vendor id of the Tobii Eye Tracker 5.
-pub(crate) const VID: u16 = 0x2104;
-
-/// USB product id of the Tobii Eye Tracker 5.
-pub(crate) const PID: u16 = 0x0313;
+/// USB vendor id shared by every supported Tobii tracker.
+pub(crate) const VID: u16 = crate::models::VID;
 
 /// Interface carrying the processed-stream endpoints.
-pub(crate) const IFACE: u8 = 0;
+pub(crate) const IFACE: u8 = crate::models::IFACE;
 
 /// Bulk IN endpoint of the multiplexed processed stream.
-pub const EP_IN: u8 = 0x83;
+pub const EP_IN: u8 = crate::models::EP_IN;
 
 /// Bulk OUT endpoint for command messages (what the init replay writes to).
-pub const EP_OUT: u8 = 0x05;
+pub const EP_OUT: u8 = crate::models::EP_OUT;
 
 /// One read must hold the largest multiplexed message on EP 0x83: the 0x50e
 /// image stream is 78609 bytes. Every message ends in a short USB packet, so a
@@ -217,14 +214,38 @@ pub fn open_tobii(ctx: &UsbContext) -> Result<rusb::DeviceHandle<UsbContext>> {
     for dev in devices.iter() {
         let desc = dev.device_descriptor()?;
 
-        if desc.vendor_id() == VID && desc.product_id() == PID {
-            info!(bus = dev.bus_number(), addr = dev.address(), "found Tobii");
-            found = Some(dev);
+        if let Some(model) = crate::models::recognise(desc.vendor_id(), desc.product_id()) {
+            info!(
+                bus = dev.bus_number(),
+                addr = dev.address(),
+                model = model.display_name,
+                vid = format_args!("{:#06x}", desc.vendor_id()),
+                pid = format_args!("{:#06x}", desc.product_id()),
+                "found Tobii",
+            );
+            found = Some((dev, model));
             break;
         }
     }
 
-    let dev = found.context("Tobii 2104:0313 not found by libusb")?;
+    let (dev, model) = found.context("no supported Tobii tracker found by libusb")?;
+
+    // Recognise-but-refuse for models we can see on the bus but cannot yet
+    // drive (no init replay captured): fail loudly rather than replay the ET5
+    // init onto a different device.
+    if !model.is_drivable() {
+        let why = match model.init {
+            crate::models::InitSource::Unavailable(note) => note,
+            crate::models::InitSource::Embedded => unreachable!(),
+        };
+        anyhow::bail!(
+            "{} ({:#06x}:{:#06x}) is recognised but cannot be driven: {why}",
+            model.display_name,
+            VID,
+            model.pid,
+        );
+    }
+
     let h = dev.open().context(OPEN_DEVICE)?;
 
     if let Err(e) = h.set_auto_detach_kernel_driver(true) {
@@ -263,8 +284,10 @@ pub fn open_tobii(ctx: &UsbContext) -> Result<rusb::DeviceHandle<UsbContext>> {
 ///
 /// # Safety
 ///
-/// `fd` must be a valid, open file descriptor for exactly this USB device
-/// (vendor 0x2104, product 0x0313), not already claimed by another handle.
+/// `fd` must be a valid, open file descriptor for exactly a supported Tobii
+/// tracker (vendor 0x2104, a product id in [`crate::models`]; the Android
+/// path today hands over an ET5, product 0x0313), not already claimed by
+/// another handle.
 ///
 /// # Errors
 ///
@@ -274,6 +297,9 @@ pub unsafe fn open_tobii_with_fd(
     ctx: &UsbContext,
     fd: std::os::fd::RawFd,
 ) -> Result<rusb::DeviceHandle<UsbContext>> {
+    // SAFETY: this `unsafe fn`'s contract (see # Safety) is that `fd` is a
+    // valid, open descriptor for exactly a supported Tobii tracker, which is
+    // what `open_device_with_fd` requires.
     let h = unsafe { ctx.open_device_with_fd(fd) }.context(OPEN_DEVICE)?;
     h.claim_interface(IFACE).context(CLAIM_INTERFACE)?;
     debug!(interface = IFACE, "claimed interface (fd-wrapped device)");
@@ -480,7 +506,7 @@ fn tobii_address(ctx: &UsbContext) -> Option<BusAddress> {
         .iter()
         .find(|d| {
             d.device_descriptor()
-                .is_ok_and(|x| x.vendor_id() == VID && x.product_id() == PID)
+                .is_ok_and(|x| crate::models::recognise(x.vendor_id(), x.product_id()).is_some())
         })
         .map(|d| BusAddress {
             bus: d.bus_number(),
@@ -875,6 +901,8 @@ fn gaze_engine_attempt(
     opens: &mut Opens,
 ) -> Result<()> {
     let mut h = match android_fd() {
+        // SAFETY: `android_fd()` returns the descriptor Android's UsbManager
+        // opened for this very device, valid for the engine's lifetime.
         Some(fd) => unsafe { open_tobii_with_fd(ctx, fd) }?,
         None => open_tobii(ctx)?,
     };
@@ -4388,7 +4416,7 @@ mod tests {
         assert_eq!(
             crate::calibration::written_display_area(&packets),
             Some((0x0e, a, id)),
-            "the capture author's monitor, bit for bit as the Windows device read it back"
+            "the capture's display area, bit for bit as the Windows device read it back"
         );
         let (b, _) = area_of("change-display-cmd-1440");
         assert_ne!(DisplayFrame::new(&a), DisplayFrame::new(&b), "A and B");
@@ -6327,12 +6355,18 @@ mod tests {
         for (i, step) in steps[..38].iter().enumerate() {
             assert_eq!(*step, AfterWrite::Await(u32::try_from(i + 1).expect("seq")));
         }
-        // The calibration upload (seq 39) spans 162 writes. The device stops
-        // taking them while its notification is unread, so every write but
-        // the last drains; the response is awaited after the last.
-        assert!(steps[38..199].iter().all(|s| *s == AfterWrite::Drain));
-        assert_eq!(steps[199], AfterWrite::Await(39));
-        assert_eq!(steps[200..], [AfterWrite::Await(40), AfterWrite::Await(41)]);
+        // The built-in calibration upload (seq 0x27) is one write, and the
+        // device's notification only makes the host drain between the pieces
+        // of a long one; the 1490 and the two stream starts follow.
+        assert_eq!(
+            steps[38..],
+            [
+                AfterWrite::Await(0x27),
+                AfterWrite::Await(0x28),
+                AfterWrite::Await(0x29),
+                AfterWrite::Await(0x2a)
+            ]
+        );
     }
 
     /// What a fake EP 0x05 saw, in order.

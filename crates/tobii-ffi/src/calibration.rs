@@ -470,10 +470,10 @@ pub extern "C" fn tobii_calibration_discard_data_3d(
 
 /// The answer of the per-eye calibration calls for an ET5:
 /// `TOBII_ERROR_CALIBRATION_NOT_STARTED` outside this handle's own session,
-/// as the DLL answers before anything else once the device checks out, and
+/// as 4.1 answers before anything else once the device checks out, and
 /// `TOBII_ERROR_NOT_SUPPORTED` inside it, with nothing sent to the daemon.
 ///
-/// The DLL's three exports (0x180148e70, 0x1801486c0, 0x180147fb0) check a
+/// 4.1's three exports (0x180148e70, 0x1801486c0, 0x180147fb0) check a
 /// null device, then the callback flag, take their API mutex, and answer
 /// `TOBII_ERROR_CALIBRATION_NOT_STARTED` while the device's session flag is
 /// clear (0x180148ed9, 0x180148729, 0x18014800f; see
@@ -485,9 +485,10 @@ pub extern "C" fn tobii_calibration_discard_data_3d(
 /// cached at connect) has per-eye calibration, id 3, other than "true"
 /// (0x1801782fb, 0x180177df4, 0x18017798e). The ET5's is "false". libtobii
 /// gates nothing on a licence, so it answers what follows the licence check;
-/// for the consumer group it reports, the DLL would answer
-/// `TOBII_ERROR_INSUFFICIENT_LICENSE`. Neither reads the point or the eyes
-/// before that, nor checks or writes the output.
+/// for the consumer group it reports, 4.1 would answer
+/// `TOBII_ERROR_INSUFFICIENT_LICENSE`. None of 4.1's three reads the point or
+/// the eyes before that, nor checks or writes the output; 4.25's check the
+/// out pointer and the eyes first, as [`per_eye_argument`] does here.
 ///
 /// # Safety
 /// `device` must be null or a live handle from `tobii_device_create` that is
@@ -507,30 +508,32 @@ unsafe fn per_eye(export: &'static str, device: *mut Device) -> Status {
 }
 
 /// Is `eyes` a `tobii_enabled_eye_t`? Stream Engine 4.25 added this check to
-/// the three per-eye exports, ahead of the device, where 4.1 never looked at
-/// the value at all: `tobii_calibration_discard_data_per_eye_2d`
-/// (0x18007e8b0) tests it with the chain `testl %r9d,%r9d` (0x18007e8e0),
-/// `subl $0x1` (0x18007e8e5), `cmpl $0x1` (0x18007e8eb), so LEFT, RIGHT and
-/// BOTH pass and anything else falls to `TOBII_ERROR_INVALID_PARAMETER` —
-/// unlogged there, and logged at line 0x73 in
-/// `tobii_calibration_collect_data_per_eye_2d`. Since the three accept
-/// exactly `TOBII_ENABLED_EYE_LEFT`, `_RIGHT` and `_BOTH`, so does this.
+/// the three per-eye exports, ahead of the device (4.1 checks the value only in
+/// its module functions, past licence and capability gates a consumer ET5 never
+/// passes: 0x18017835b, 0x180177e56):
+/// `tobii_calibration_discard_data_per_eye_2d` (0x18007e8b0) tests it with the
+/// chain `testl %r9d,%r9d` (0x18007e8e0), `subl $0x1` (0x18007e8e5),
+/// `cmpl $0x1` (0x18007e8eb), so LEFT, RIGHT and BOTH pass and anything else
+/// falls to `TOBII_ERROR_INVALID_PARAMETER` — unlogged there, and logged at
+/// line 0x73 in `tobii_calibration_collect_data_per_eye_2d`. Since the three
+/// accept exactly `TOBII_ENABLED_EYE_LEFT`, `_RIGHT` and `_BOTH`, so does this.
 fn is_enabled_eye(eyes: u32) -> bool {
     eyes == TOBII_ENABLED_EYE_LEFT
         || eyes == TOBII_ENABLED_EYE_RIGHT
         || eyes == TOBII_ENABLED_EYE_BOTH
 }
 
-/// The argument checks 4.25 runs **before** it looks at the device, and 4.1
-/// ran not at all — so they answer `TOBII_ERROR_INVALID_PARAMETER` with no
-/// session, no handle and nothing sent, where this library used to answer
-/// `TOBII_ERROR_CALLBACK_IN_PROGRESS`, `TOBII_ERROR_CALIBRATION_NOT_STARTED`
-/// or `TOBII_ERROR_NOT_SUPPORTED`. Taken on because the library reports
-/// 4.25.0.3; the three sites in 4.25 are `testq %rdx,%rdx` at 0x18007e505
-/// (`compute_and_apply_per_eye`'s out pointer), the fifth-argument load and
-/// test at 0x18007e1fa/0x18007e20a (`collect_data_per_eye_2d`, line 0x5f)
-/// and the enum chain of [`is_enabled_eye`]. Called under Wine, 4.25 trips
-/// its own log block for each while 4.1 runs on into its callback guard.
+/// The argument checks 4.25 runs **before** it looks at the device, where 4.1
+/// checks only the eyes, past its gates, and never the pointer — so they answer
+/// `TOBII_ERROR_INVALID_PARAMETER` with no session, no handle and nothing sent,
+/// where this library used to answer `TOBII_ERROR_CALLBACK_IN_PROGRESS`,
+/// `TOBII_ERROR_CALIBRATION_NOT_STARTED` or `TOBII_ERROR_NOT_SUPPORTED`. Taken
+/// on because the library reports 4.25.0.3; the three sites in 4.25 are
+/// `testq %rdx,%rdx` at 0x18007e505 (`compute_and_apply_per_eye`'s out
+/// pointer), the fifth-argument load and test at 0x18007e1fa/0x18007e20a
+/// (`collect_data_per_eye_2d`, line 0x5f) and the enum chain of
+/// [`is_enabled_eye`]. Called under Wine, 4.25 trips its own log block for each
+/// while 4.1 runs on into its callback guard.
 ///
 /// `eyes` is checked only where the export takes one, `out` only where it
 /// writes one; `out` is compared with null and never written, as in both
@@ -630,28 +633,15 @@ mod tests {
         unsafe { (*ud.cast::<Vec<CalibrationPointData>>()).push(*p) };
     }
 
-    fn embedded_blob() -> Vec<u8> {
-        use tobii_proto::protocol::{parse_init_packets, parse_message};
-        let text = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../tobii-usb/init_packets_ep.txt"
-        ));
-        let packets = parse_init_packets(text).expect("init file");
-        let body: Vec<u8> = packets[38..200]
-            .iter()
-            .flat_map(|p| p.data[8..].iter().copied())
-            .collect();
-        let prefixed = [&[0u8; 8][..], &body].concat();
-        let payload = parse_message(&prefixed).expect("header").payload;
-        tobii_proto::calibration::blob_from_payload(payload)
-            .expect("blob")
-            .to_vec()
+    /// A calibration as the tracker hands one out: made up, 14 points.
+    fn device_blob() -> Vec<u8> {
+        tobii_calib::testing::device_like(0x1234_5678)
     }
 
     #[test]
     #[allow(clippy::float_cmp)] // reason: compares rounded values
-    fn parses_the_embedded_calibration() {
-        let blob = embedded_blob();
+    fn parses_a_calibration() {
+        let blob = device_blob();
         let mut api: *mut Api = ptr::null_mut();
         let mut points: Vec<CalibrationPointData> = Vec::new();
         // SAFETY: live locals; `collect` matches the receiver contract.
@@ -733,7 +723,7 @@ mod tests {
     #[test]
     #[allow(clippy::float_cmp)] // reason: the points are copied, not computed
     fn parse_reports_each_eyes_own_status() {
-        let mut blob = embedded_blob();
+        let mut blob = device_blob();
         let records = tobii_calib::blob::points(&blob).expect("points");
         let total =
             usize::try_from(tobii_calib::blob::header(&blob).expect("header").total).expect("fits");
@@ -772,7 +762,7 @@ mod tests {
 
     #[test]
     fn parse_reports_a_failed_eye_and_passes_its_mapping_on() {
-        let mut blob = embedded_blob();
+        let mut blob = device_blob();
         let total =
             usize::try_from(tobii_calib::blob::header(&blob).expect("header").total).expect("fits");
         let first = total + 8;
@@ -885,7 +875,7 @@ mod tests {
     /// what parsing inside `tobii_calibration_retrieve`'s receiver needs.
     #[test]
     fn parse_runs_inside_a_callback() {
-        let blob = embedded_blob();
+        let blob = device_blob();
         let mut api: *mut Api = ptr::null_mut();
         let mut points: Vec<CalibrationPointData> = Vec::new();
         // SAFETY: live locals; `blob` is readable for its length and
@@ -979,7 +969,7 @@ mod tests {
 
     #[test]
     fn parse_refuses_data_that_is_not_a_calibration() {
-        let blob = embedded_blob();
+        let blob = device_blob();
         let total =
             usize::try_from(tobii_calib::blob::header(&blob).expect("header").total).expect("fits");
         let mut negative = blob.clone();
@@ -1180,7 +1170,7 @@ mod tests {
     /// test fails before it touches that device again.
     #[test]
     fn a_retrieve_receiver_is_refused_what_a_callback_is() {
-        let blob = embedded_blob();
+        let blob = device_blob();
         let d = Box::into_raw(Box::new(device_with(0, blob.clone())));
         let other = Box::into_raw(Box::new(device_with(0, vec![1])));
         let mut api: *mut Api = ptr::null_mut();

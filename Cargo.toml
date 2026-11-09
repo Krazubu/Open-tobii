@@ -9,7 +9,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.4.1"
+version = "0.6.0"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT"
@@ -38,7 +38,7 @@ tobii-calib = { path = "crates/tobii-calib" }
 tobii-ffi = { path = "crates/tobii-ffi" }
 tobii-pose = { path = "crates/tobii-pose" }
 tobii-proto = { path = "crates/tobii-proto" }
-tobii-usb = { path = "crates/tobii-usb" }
+tobii-usb = { path = "crates/tobii-usb", default-features = false }
 tobii-ipc = { path = "crates/tobii-ipc" }
 tobii-log = { path = "crates/tobii-log" }
 

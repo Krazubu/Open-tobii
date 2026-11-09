@@ -875,40 +875,39 @@ mod tests {
 
     #[test]
     fn stream_start_packet_matches_captured_init_line() {
-        // Last line of init_packets_ep.txt (start gaze 0x500, seq 0x28), then
-        // the Windows session1 start of the image stream.
+        // The gaze 0x500 start in init_packets_ep.txt (seq 0x29; the capture
+        // renumbered it from 0x28 when the 1490 moved in), then the Windows
+        // session1 start of the image stream.
         let expected = hex_to_bytes(
-            "000000002c000000000000510000002800000000000004c4000000000000001400000200000004000005\
+            "000000002c000000000000510000002900000000000004c4000000000000001400000200000004000005\
              00170000000400000000",
         )
         .expect("valid hex");
-        assert_eq!(stream_start_packet(0x28, STREAM_ID_GAZE), expected);
+        assert_eq!(stream_start_packet(0x29, STREAM_ID_GAZE), expected);
         let img = stream_start_packet(0x2a, STREAM_ID_IMAGE);
         assert_eq!(img.len(), expected.len());
         assert_eq!(&img[39..43], &[0, 0, 0x05, 0x0e]);
         assert_eq!(&img[12..16], &[0, 0, 0, 0x2a]);
     }
 
-    /// The 1110 calibration upload in the init replay is 162 bulk writes;
-    /// re-chunking the reassembled command must give back every one of them.
+    /// The 1110 calibration upload in the init replay is one bulk write;
+    /// re-chunking the reassembled command must give back that very packet.
     #[test]
-    fn chunk_command_reproduces_the_captured_calibration_upload() {
+    fn chunk_command_reproduces_the_embedded_calibration_upload() {
         let packets = parse_init_packets(crate::INIT_PACKETS).expect("init file parses");
-        let run: Vec<&[u8]> = packets[38..200].iter().map(|p| p.data.as_slice()).collect();
-        let message: Vec<u8> = run.iter().flat_map(|p| p[8..].iter().copied()).collect();
-        let prefixed = [&[0u8; 8][..], &message].concat();
-        let head = parse_message(&prefixed).expect("header");
+        let packet = packets
+            .iter()
+            .find(|p| parse_message(&p.data).is_some_and(|m| m.id == 1110))
+            .expect("the init's 1110");
+        let head = parse_message(&packet.data).expect("header");
         assert_eq!(
             (head.marker, head.id, head.seq),
             (MARKER_COMMAND, 1110, 0x27)
         );
 
-        let chunks = chunk_command(1110, 0x27, &message[24..]);
+        let chunks = chunk_command(1110, 0x27, &packet.data[HEADER_LEN..]);
 
-        assert_eq!(chunks.len(), 162);
-        for (i, (got, want)) in chunks.iter().zip(&run).enumerate() {
-            assert_eq!(got.as_slice(), *want, "chunk {i}");
-        }
+        assert_eq!(chunks, vec![packet.data.clone()]);
     }
 
     #[test]

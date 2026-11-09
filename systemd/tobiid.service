@@ -1,6 +1,6 @@
 [Unit]
 Description=Tobii Eye Tracker 5 daemon (head/gaze/presence broker)
-Documentation=https://github.com/Skyggedans/tobii-linux
+Documentation=https://github.com/Krazubu/Open-tobii
 # No After=default.target: the clients' units, which default.target wants and
 # so starts after, order themselves after this one, and the three made a
 # cycle that systemd broke at login by dropping a client. XDG_RUNTIME_DIR

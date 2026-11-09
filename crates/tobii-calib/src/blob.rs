@@ -315,20 +315,23 @@ pub(crate) mod tests {
     use tobii_proto::calibration::blob_from_payload;
     use tobii_proto::protocol::{parse_init_packets, parse_message};
 
-    /// The calibration the init replay uploads (the author's).
-    pub(crate) fn embedded_blob() -> Vec<u8> {
+    /// The calibration the init replay uploads when the user has none: the
+    /// tracker's own power-up default. Read only to check the format against
+    /// a real blob; every other test takes a made-up one ([`crate::testing`]).
+    fn embedded_blob() -> Vec<u8> {
         let text = include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../tobii-usb/init_packets_ep.txt"
         ));
         let packets = parse_init_packets(text).expect("init file");
-        let message: Vec<u8> = packets[38..200]
+        let upload = packets
             .iter()
-            .flat_map(|p| p.data[8..].iter().copied())
-            .collect();
-        let prefixed = [&[0u8; 8][..], &message].concat();
-        let payload = parse_message(&prefixed).expect("header").payload;
-        blob_from_payload(payload).expect("blob").to_vec()
+            .find_map(|p| {
+                let message = parse_message(&p.data)?;
+                (message.id == tobii_proto::calibration::cmd::WRITE).then_some(message)
+            })
+            .expect("the init's 1110 write");
+        blob_from_payload(upload.payload).expect("blob").to_vec()
     }
 
     #[test]
@@ -336,27 +339,18 @@ pub(crate) mod tests {
         let blob = embedded_blob();
 
         let info = validate(&blob).expect("valid");
-        let records = points(&blob).expect("points");
 
-        assert_eq!(info.id, 1_904_654_973);
-        assert_eq!(info.points, 14);
+        // The tracker's power-up default: id 0, no point records.
+        assert_eq!(info.id, 0);
+        assert_eq!(info.points, 0);
         assert!(info.conventional);
-        for (record, target) in records.iter().zip(STIMULUS_POINTS.iter().cycle()) {
-            assert!(
-                (record.target[0] - target[0]).abs() < 1e-6
-                    && (record.target[1] - target[1]).abs() < 1e-6
-            );
-            assert_eq!((record.a_status, record.b_status), (1, 1));
-        }
-        // Values from tools/calibration.json (offsets 658563 / 658587),
-        // one tracker's blob as `extract-calibration --json` dumps it.
-        assert!((records[1].a[0] - 0.501_088_9).abs() < 1e-6);
-        assert!((records[1].b[1] - 0.128_229_7).abs() < 1e-6);
+        assert_eq!(blob.len(), 1469);
+        assert!(points(&blob).expect("points").is_empty());
     }
 
     #[test]
     fn rejects_damaged_blobs() {
-        let blob = embedded_blob();
+        let blob = crate::testing::device_like(1);
         assert!(matches!(
             validate(&blob[..blob.len() - 1]),
             Err(BlobError::Trailer { .. })
@@ -377,9 +371,9 @@ pub(crate) mod tests {
     const B: usize = 24;
     const B_STATUS: usize = 32;
 
-    /// The embedded blob with `bytes` written at each offset into record `i`.
+    /// A made-up blob with `bytes` written at each offset into record `i`.
     fn edited(i: usize, edits: &[(usize, &[u8])]) -> Vec<u8> {
-        let mut blob = embedded_blob();
+        let mut blob = crate::testing::device_like(1);
         let total = usize::try_from(header(&blob).expect("header").total).expect("fits");
         let record = total + 8 + i * RECORD_LEN;
         for (offset, bytes) in edits {

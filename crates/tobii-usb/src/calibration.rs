@@ -1,11 +1,12 @@
 //! The init replay, adapted to this user: their saved calibration instead of
-//! the one embedded in the capture, and their display area instead of the
-//! capture author's monitor.
+//! the tracker's power-up default the replay carries (id 0), and their
+//! display area instead of the capture's (633.6 x 334.3 mm).
 //!
-//! Both are single commands inside the replay (1110 write-calibration, split
-//! over 162 bulk writes, and 1440 set-display-area); they are rebuilt with the
-//! same sequence numbers, so the rest of the replay and the command numbering
-//! after it are unchanged.
+//! Both are single commands inside the replay (1110 write-calibration and
+//! 1440 set-display-area); they are rebuilt with the same sequence numbers,
+//! so the rest of the replay and the command numbering after it are
+//! unchanged. The built-in blob fits in one bulk write; a saved calibration
+//! of the user's is chunked.
 
 use std::ops::Range;
 use std::path::PathBuf;
@@ -22,13 +23,16 @@ use tracing::{info, warn};
 
 use crate::device::EP_OUT;
 
-/// The Windows engine's init sequence, captured once and replayed verbatim.
+/// The Windows engine's init sequence as captured, with the tracker's own
+/// power-up default in place of the calibration the capture uploaded and a
+/// calibration-status ask (1490) after it; the two stream starts that
+/// followed moved to the sequence numbers freed by the shorter upload.
 const EMBEDDED_INIT: &str = include_str!("../init_packets_ep.txt");
 
 /// Where the calibration in use came from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Source {
-    /// Built into the init replay (the capture author's).
+    /// Built into the init replay: the tracker's power-up default, id 0.
     Embedded,
     /// The user's saved calibration.
     File(PathBuf),
@@ -178,13 +182,27 @@ pub fn current_blob() -> Result<(Vec<u8>, Source)> {
 pub fn init_packets(display_area: Option<&DisplayArea>) -> Result<Vec<InitPacket>> {
     let mut packets = embedded_packets()?;
     let (blob, source) = current_blob()?;
-    if let Source::File(path) = &source {
-        packets = substitute_calibration(&packets, &blob)?;
-        info!(
-            path = %path.display(),
+    match &source {
+        Source::File(path) => {
+            packets = substitute_calibration(&packets, &blob)?;
+            info!(
+                path = %path.display(),
+                id = tobii_calib::blob::calibration_id(&blob),
+                "calibration: using the saved calibration"
+            );
+        }
+        Source::Embedded if store::embedded_chosen() => {
+            info!(
+                "calibration: the built-in one, as {}={} asks",
+                store::ENV_OVERRIDE,
+                store::EMBEDDED
+            );
+        }
+        Source::Embedded => warn!(
             id = tobii_calib::blob::calibration_id(&blob),
-            "calibration: using the saved calibration"
-        );
+            "calibration: the built-in one, the tracker's power-up default (id 0): coarse, so \
+             gaze on the screen is off until tobii-calibrate makes yours"
+        ),
     }
     if let Some(area) = display_area {
         packets = substitute_display_area(&packets, area)?;
@@ -201,10 +219,8 @@ mod tests {
     fn substituting_the_embedded_blob_changes_nothing() {
         let packets = embedded_packets().expect("embedded");
         let blob = embedded_blob().expect("blob");
-        assert_eq!(
-            tobii_calib::blob::calibration_id(&blob),
-            Some(1_904_654_973)
-        );
+        // The replay uploads the tracker's own power-up default, id 0.
+        assert_eq!(tobii_calib::blob::calibration_id(&blob), Some(0));
 
         let substituted = substitute_calibration(&packets, &blob).expect("substitute");
 
@@ -218,10 +234,28 @@ mod tests {
 
         let substituted = substitute_calibration(&packets, &blob).expect("substitute");
 
-        assert_eq!(substituted.len(), packets.len() - 161);
+        // The replay's upload is one packet already; it is swapped for one.
+        assert_eq!(substituted.len(), packets.len());
         let (run, seq) = command_run(&substituted, calib_cmd::cmd::WRITE).expect("run");
         assert_eq!((run.len(), seq), (1, 0x27));
         assert_eq!(next_command_seq(&substituted), next_command_seq(&packets));
+    }
+
+    /// The replay ends with the two stream starts, and the command numbering
+    /// after it follows them.
+    #[test]
+    fn the_replay_ends_with_the_stream_starts() {
+        let packets = embedded_packets().expect("embedded");
+
+        assert_eq!(
+            command_of(&packets[packets.len() - 2].data),
+            Some((1220, 0x29))
+        );
+        assert_eq!(
+            command_of(&packets[packets.len() - 1].data),
+            Some((1220, 0x2a))
+        );
+        assert_eq!(next_command_seq(&packets), 0x2b);
     }
 
     /// A display area a user might set: a 597 x 336 mm monitor.
@@ -254,6 +288,19 @@ mod tests {
         let (written, id) = tobii_proto::facts::parse_display_area(&msg).expect("area");
         assert_eq!(id, Some(DEFAULT_DISPLAY_ID));
         assert!((written.top_right_mm[0] - written.top_left_mm[0] - 597.0).abs() < 1e-6);
+    }
+
+    /// What the clients and the daemon's log say the built-in area is.
+    #[test]
+    fn the_built_in_area_is_the_size_the_store_names() {
+        let packets = embedded_packets().expect("embedded");
+        let (_, area, _) = written_display_area(&packets).expect("the replay's 1440");
+
+        let (width, height) = tobii_calib::display::size_mm(&area);
+
+        let (named_width, named_height) = tobii_calib::display::BUILT_IN_MM;
+        assert!((width - named_width).abs() < 0.05, "{width}");
+        assert!((height - named_height).abs() < 0.05, "{height}");
     }
 
     #[test]

@@ -223,8 +223,8 @@ pub(crate) fn daemon_init_packets() -> Result<Vec<InitPacket>> {
     let area = tobii_calib::store::config_dir()
         .and_then(|dir| saved_display_area(&dir.join(DISPLAY_AREA_FILE)));
     match &area {
-        Some(_) => println!("init: the user's calibration and saved display area"),
-        None => println!("init: the user's calibration and the capture's display area"),
+        Some(_) => println!("init: the calibration in use and the user's saved display area"),
+        None => println!("init: the calibration in use and the capture's display area"),
     }
     tobii_usb::calibration::init_packets(area.as_ref())
 }

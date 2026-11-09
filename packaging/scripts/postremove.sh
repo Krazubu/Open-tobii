@@ -1,5 +1,5 @@
 #!/bin/sh
-# After tobii-linux is removed, or replaced by another version: either way the
+# After open-tobii is removed, or replaced by another version: either way the
 # udev rules and the library may have changed or gone. dpkg passes "remove"
 # and rpm 0 when it is removed.
 
@@ -14,7 +14,7 @@ fi
 
 case "$1" in
 	remove | 0)
-		echo "tobii-linux removed. A daemon still running stops at logout, or now with"
+		echo "open-tobii removed. A daemon still running stops at logout, or now with"
 		echo "  systemctl --user stop 'tobii*'; pkill -x tobiid"
 		;;
 esac

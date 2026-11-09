@@ -1,0 +1,33 @@
+post_install() {
+  cat <<'MSG'
+open-tobii is installed. Plug the tracker in, then:
+
+  tobii-calibrate            calibrate once, as each user who wants gaze on
+                             the screen (games, applications, gaze-switcher;
+                             head pose does not need it); it starts the
+                             daemon itself, and a notification offers it at
+                             login until then
+
+Opt-in, each one `systemctl --user enable --now`:
+  tobii-gaze-keys.service    gaze to arrow keys -- needs the `input` group,
+                             which lets every program you run read all
+                             keyboards: sudo usermod -aG input "$USER"
+  tobii-opentrack.service    head pose to OpenTrack over UDP 4242
+
+The udev rules land in /etc/udev/rules.d. They take effect for a tracker
+plugged in after `udevadm control --reload`; re-plug it otherwise.
+
+/usr/share/doc/open-tobii/INSTALL.md has the rest.
+MSG
+}
+
+post_upgrade() {
+  # Before 0.4.1 the display setup never succeeded: a calibration made then
+  # was made on the area the tracker had, usually the init capture's.
+  if [ "$(vercmp "$2" 0.4.1)" -lt 0 ]; then
+    echo "Calibrated before 0.4.1? Run tobii-calibrate again, with its display setup."
+  fi
+  if systemctl --user --quiet is-active tobiid.service 2>/dev/null; then
+    echo "Restart the running daemon:  systemctl --user restart tobiid"
+  fi
+}

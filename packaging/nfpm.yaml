@@ -6,7 +6,7 @@
 # Only the files are listed, and the directories that are the package's
 # alone: a package that also claimed /usr/bin, say, would conflict with the
 # one that owns it (on Fedora its mode differs).
-name: tobii-linux
+name: open-tobii
 arch: amd64
 platform: linux
 version: ${VERSION}
@@ -14,13 +14,13 @@ release: 1
 section: misc
 priority: optional
 maintainer: Andrii Klaptsov <skyggedanser@gmail.com>
-homepage: https://github.com/Skyggedans/tobii-linux
+homepage: https://github.com/Krazubu/Open-tobii
 license: MIT AND Apache-2.0
 description: |-
   Linux driver for the Tobii Eye Tracker 5
   tobiid, the daemon that owns the tracker and serves gaze, head pose and
   presence to local clients; libtobii.so, a library with the Stream Engine
-  4.1 API (OpenTrack's tracker-tobii builds against it), and its C headers;
+  4.25 API (OpenTrack's tracker-tobii builds against it), and its C headers;
   tobii-calibrate, the calibration, among the desktop's applications;
   tobii-opentrack and tobii-gaze-keys.
 
@@ -42,6 +42,8 @@ overrides:
       - libxcb1
       - libxcursor1
       - libxi6
+      # notify-send: the reminder to calibrate, with its buttons.
+      - libnotify-bin
   rpm:
     # hicolor-icon-theme owns the icon's directories (dpkg removes the ones
     # it made, rpm does not).
@@ -60,6 +62,7 @@ overrides:
       - libxcb.so.1()(64bit)
       - libXcursor.so.1()(64bit)
       - libXi.so.6()(64bit)
+      - /usr/bin/notify-send
 
 contents:
   - src: target/package/stage/pkg/usr/bin/*
@@ -83,13 +86,19 @@ contents:
     dst: /usr/share/applications/tobii-calibrate.desktop
   - src: target/package/stage/pkg/usr/share/icons/hicolor/scalable/apps/tobii-calibrate.svg
     dst: /usr/share/icons/hicolor/scalable/apps/tobii-calibrate.svg
+  # Every user's, so in /etc: a configuration file, which an upgrade does
+  # not overwrite once edited, and a removal (dpkg's, not its purge) may
+  # leave behind, where its TryExec keeps it from running anything.
+  - src: target/package/stage/pkg/etc/xdg/autostart/tobii-calibrate-remind.desktop
+    dst: /etc/xdg/autostart/tobii-calibrate-remind.desktop
+    type: config|noreplace
   # The documentation and licences as staged, whatever `make stage` puts
   # there; the .deb adds the copyright file Debian wants.
-  - src: target/package/stage/pkg/usr/share/doc/tobii-linux/
-    dst: /usr/share/doc/tobii-linux/
+  - src: target/package/stage/pkg/usr/share/doc/open-tobii/
+    dst: /usr/share/doc/open-tobii/
     type: tree
   - src: target/package/stage/deb-copyright
-    dst: /usr/share/doc/tobii-linux/copyright
+    dst: /usr/share/doc/open-tobii/copyright
     packager: deb
 
 scripts:

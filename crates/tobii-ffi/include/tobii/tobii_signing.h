@@ -51,6 +51,18 @@ typedef enum tobii_signing_result_t
     TOBII_SIGNING_NOT_VERIFIED,             /* 16 */
 } tobii_signing_result_t;
 
+/* The keys libtobii.so reads: an unencrypted RSA key only, as the one PEM
+ * block of its text, with nothing after its END line but one line ending.
+ * Trailing text, a blank line or a NUL counted in key_data_size is
+ * TOBII_SIGNING_SIGN_PEM_FAILED or TOBII_SIGNING_VERIFY_PEM_FAILED, and so
+ * is a public exponent of 2^33 or more, or a public key of more than 4096
+ * bits. Key bytes in key_data that are not UTF-8 are
+ * TOBII_SIGNING_KEY_BUFFER_FAILED, which the DLL answers only when it cannot
+ * allocate. The DLL, through OpenSSL, reads more keys than these (inferred).
+ * Signing with a key of 488 bits or fewer, too short for the padding, is
+ * TOBII_SIGNING_SIGN_FINAL_FAILED, the step at which the DLL fails such a
+ * key (inferred); up to 0.4.1 it aborted the calling process. */
+
 /* Sign data_size bytes of data with the PEM private key (PKCS#8 or PKCS#1)
  * in the file key_path, or held in key_data. The base64 signature goes to
  * signature, which must point to at least 640 bytes: the call takes no
@@ -58,11 +70,16 @@ typedef enum tobii_signing_result_t
  * terminator, goes to signature_size.
  *
  * libtobii.so NUL-terminates the signature whenever it writes one and writes
- * nothing at all on failure. The DLL instead memsets 640 bytes before it has
- * read anything, terminates only while the encoded length is 477 or less, and
- * never terminates in the _with_private_key form, so a caller written against
- * the DLL must use signature_size. A null argument here is
- * TOBII_SIGNING_NULL_ARGUMENT, where the DLL dereferences it. */
+ * nothing at all on failure. The DLL writes no terminator: tobii_signing_sign
+ * clears the 640 bytes before it has read anything, which leaves the
+ * signature terminated while the raw signature is 477 bytes or less (636
+ * encoded, a key of at most 3816 bits), and the _with_private_key form
+ * clears nothing, so a caller written against the DLL must use
+ * signature_size. A larger key's signature does not fit with its terminator,
+ * and libtobii.so answers TOBII_SIGNING_BASE64_FAILED for it, where the DLL
+ * fills the 640 bytes or, past 3840 bits, runs beyond them. A null
+ * signature_size here is TOBII_SIGNING_NULL_ARGUMENT, where the DLL writes
+ * through it unchecked; the other arguments it checks as libtobii.so does. */
 TOBII_API tobii_signing_result_t TOBII_CALL tobii_signing_sign( void const* data,
     size_t data_size, char* signature, size_t* signature_size, char const* key_path );
 TOBII_API tobii_signing_result_t TOBII_CALL tobii_signing_sign_with_private_key(

@@ -256,7 +256,7 @@ pub(crate) struct State {
     pub(crate) display_override: Option<DisplayArea>,
     /// `TOBII_DISPLAY_MM`: the monitor to configure once the mounting is known.
     pub(crate) display_request: Option<crate::requests::DisplaySize>,
-    /// Where a display area a client sets is saved (see [`crate::display`]);
+    /// Where a display area a client sets is saved (see [`tobii_calib::display`]);
     /// `None` keeps it in memory only.
     pub(crate) display_file: Option<PathBuf>,
     /// The name a client gave the device (or the saved one); `None` until
@@ -500,6 +500,18 @@ impl State {
         self.tracker_absence_logged = false;
         self.engine_armed = false;
         self.engine_started_at = Some(now);
+        // Neither saved nor asked for by TOBII_DISPLAY_MM: the init replay
+        // keeps the capture's area. The engine's init says the like of the
+        // calibration.
+        if self.display_override.is_none() && self.display_request.is_none() {
+            let (width_mm, height_mm) = tobii_calib::display::BUILT_IN_MM;
+            warn!(
+                width_mm,
+                height_mm,
+                "display area: the init capture's, not your monitor's: gaze on the screen is \
+                 off until tobii-calibrate sets yours"
+            );
+        }
         #[cfg(not(test))]
         {
             self.engine = Some(Engine::start_seeded(
@@ -923,12 +935,14 @@ pub(crate) fn lock_state(state: &Mutex<State>) -> MutexGuard<'_, State> {
     state.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// How often a request waiting for `pause_lock` or `catalogue_lock` tries
-/// it.
+/// How often a request waiting for one of the locks [`lock_until`] guards
+/// tries it.
 const LOCK_POLL: Duration = Duration::from_millis(10);
 
 /// `lock`, one of the locks a request holds across its device commands
-/// (`pause_lock`, `catalogue_lock`), waiting until `deadline` at most.
+/// (`power_save_lock`, `pause_lock`, `catalogue_lock`), waiting until
+/// `deadline` at most. The lock is tried before it is ever waited on, so a
+/// caller with nothing to wait for pays nothing for asking.
 pub(crate) fn lock_until(lock: &Mutex<()>, deadline: Instant) -> Option<MutexGuard<'_, ()>> {
     loop {
         match lock.try_lock() {
@@ -1106,7 +1120,7 @@ pub fn run() -> Result<()> {
     let state = Arc::new(Mutex::new(State::new(prewarm)));
     {
         let mut st = lock_state(&state);
-        st.display_file = crate::display::default_path();
+        st.display_file = tobii_calib::display::default_path();
         crate::requests::restore_saved_display_area(&mut st);
         st.name_file = crate::name::default_path();
         crate::name::restore(&mut st);
@@ -1486,8 +1500,7 @@ fn has_peer_hung_up(id: u64, stream: &UnixStream) -> bool {
         // the call does not block.
         let ready = unsafe { libc::poll(&raw mut fd, 1, 0) };
         if ready >= 0 {
-            return ready > 0
-                && fd.revents & (POLLRDHUP | libc::POLLHUP | libc::POLLERR) != 0;
+            return ready > 0 && fd.revents & (POLLRDHUP | libc::POLLHUP | libc::POLLERR) != 0;
         }
         let e = io::Error::last_os_error();
         if e.kind() != io::ErrorKind::Interrupted {

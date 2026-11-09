@@ -1,16 +1,16 @@
 # Distribution packaging
 
-## AUR — `tobii-linux-bin`
+## AUR — `open-tobii-bin`
 
 `PKGBUILD`, `.SRCINFO` and the install hook here are complete and were checked
-against the published v0.2.0 tarball: the checksum matches, `package()` runs
-clean and lays out 29 files in an Arch-correct tree. They are **not published**;
+against the published v0.5.0 tarball: the checksum matches, `package()` runs
+clean and lays out 31 files in an Arch-correct tree. They are **not published**;
 doing that needs an AUR account and its SSH key:
 
 ```sh
-git clone ssh://aur@aur.archlinux.org/tobii-linux-bin.git
-cp packaging/aur/{PKGBUILD,.SRCINFO,tobii-linux-bin.install} tobii-linux-bin/
-cd tobii-linux-bin && git add -A && git commit && git push
+git clone ssh://aur@aur.archlinux.org/open-tobii-bin.git
+cp packaging/aur/{PKGBUILD,.SRCINFO,open-tobii-bin.install} open-tobii-bin/
+cd open-tobii-bin && git add -A && git commit && git push
 ```
 
 On each release, `pkgver`, the `source` URL and the `sha256sums` have to follow
@@ -21,7 +21,7 @@ have `makepkg` to hand.
 **Why `-bin` and not a source package.** `ort-sys` downloads the ONNX Runtime
 over the network while it builds, which makepkg's guidelines rule out of
 `build()`, and the head-pose model is an embedded asset. A from-source
-`tobii-linux` would need onnxruntime vendored or made optional first. The
+`open-tobii` would need onnxruntime vendored or made optional first. The
 binary it installs is built in a container by this repository's CI from the
 tagged commit, which is the same artifact the `.deb` and `.rpm` come from.
 
@@ -45,6 +45,6 @@ build made network-free first. Two ways, neither small:
   the package *is*, and head pose is half of why people want this.
 
 Until one of those is done, Fedora users have the `.rpm` from the release page,
-which `dnf install ./tobii-linux-*.rpm` takes. That is a worse experience than
+which `dnf install ./open-tobii-*.rpm` takes. That is a worse experience than
 a repository — no updates — and it is an honest gap rather than a solved
 problem.

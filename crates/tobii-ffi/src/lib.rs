@@ -4,8 +4,8 @@
 //! Every one of the 199 entry points `tobii_stream_engine.dll` 4.25.0.3
 //! exports is exported here with the same signature, and no other, so any
 //! Stream Engine client links and runs. 4.1.0.3, which this library followed
-//! until it had the whole of 4.25's surface, exports 153 of them. What stands
-//! behind each:
+//! until it had the whole of 4.25's surface, exports 151 of them, and two
+//! that 4.25 renamed. What stands behind each:
 //!
 //! - **Implemented** — device lifetime and callbacks, device info (the public
 //!   and the internal one), track box,
@@ -33,7 +33,7 @@
 //!   `custom_command`). The hardware
 //!   configuration is implemented provisionally; the ET5 has reported none
 //!   on Linux, so it answers `TOBII_ERROR_NOT_SUPPORTED` there.
-//! - **Answered locally** — API version (4.1.0.3), error texts (the DLL's),
+//! - **Answered locally** — API version (4.25.0.3), error texts (the DLL's),
 //!   system clock, output frequency (33 Hz), enabled eye (both), feature
 //!   group (consumer), license validation (every key valid), display-area
 //!   calculation, calibration parsing, internal-capability support (eyeball
@@ -73,6 +73,23 @@
 //!   not hold them, and the two retrieves because its tracker module offers
 //!   neither of the PRP commands they look for (see `diagnostics` and
 //!   `display_id`).
+//! - **What 4.25 adds** — of the 46 entry points Stream Engine 4.25 adds (its
+//!   two renames are internal stream 5's subscribe and unsubscribe, above),
+//!   seventeen give real answers. Ten come from the daemon: the tracker's fault
+//!   and warning lists and their streams (see `faults`), the presence stream
+//!   and the responsive gaze point, which carries the tracker's own unfiltered
+//!   point (key 0x20), where the DLL, driving an ET5 itself, most likely
+//!   refuses the subscribe (see `streams`). Seven are answered locally: the
+//!   output frequency as a stream, whose receiver is called once, from inside
+//!   subscribe, with the 33 Hz the ET5 never changes (see `config`), whether
+//!   the extended lens configuration can be written, never, as for the basic
+//!   one (see `wearable`), and the four signing calls, which need no device
+//!   (see `signing`). The other twenty-nine answer `TOBII_ERROR_NOT_SUPPORTED`
+//!   once their arguments check out, as the DLL does for a tracker it drives
+//!   itself (read or inferred, see `internal` and `wearable`), but for absolute
+//!   eye openness, whose support it answers from uninitialised stack, and the
+//!   ambient light level's unsubscribe, which it may answer
+//!   `TOBII_ERROR_NOT_SUBSCRIBED`.
 //!
 //! Seven entry points answer the DLL's licence refusal. What the Stream Engine
 //! reserves for a higher feature group or an extra licence (gaze data,
@@ -103,10 +120,11 @@
 //! `stub::licence_refused`, the per-eye calibration calls,
 //! `tobii_send_statistics`, `tobii_set_illumination_mode` and
 //! `tobii_enable_extension`, but not
-//! `tobii_set_display_info` or `tobii_set_fw_upgrade_allowed`, in which the
-//! DLL checks no callback flag. Four more refuse it once their arguments
-//! check out, as in the DLL: `tobii_api_destroy` (the DLL keeps its callback
-//! flag in the API instance), `tobii_device_create` and
+//! `tobii_set_display_info` or `tobii_set_fw_upgrade_allowed`, in which 4.1
+//! checks no callback flag (4.25 checks one in `tobii_set_display_info`,
+//! which this library does not; see there). Three more refuse it once their
+//! arguments check out, as in the DLL: `tobii_api_destroy` (the DLL keeps its
+//! callback flag in the API instance), `tobii_device_create` and
 //! `tobii_device_create_ex` (a callback could not destroy what they make).
 //! `tobii_calibration_parse` is the one entry point that does **not** refuse
 //! a call from inside a callback: 4.25 dropped the check 4.1 had, and this
@@ -149,15 +167,19 @@
 //!
 //! An entry point that takes a device handle checks the callback first, then
 //! a null device, then its other arguments (`TOBII_ERROR_INVALID_PARAMETER`
-//! both). Three check arguments first: `tobii_calibration_start` its eye,
-//! `tobii_calibration_apply` its blob and `tobii_wait_for_callbacks` its
-//! count and null handles. The DLL checks the handle, and sometimes more,
-//! first, so the two differ only for an invalid argument passed from inside a
-//! callback. Two check no callback, as in the DLL: `tobii_set_display_info`,
-//! which checks its pointers only, and `tobii_set_fw_upgrade_allowed`, which
-//! checks nothing. The DLL also refuses only calls into the API instance
-//! whose callbacks run, where here any is refused, and it counts the receiver
-//! of `tobii_enumerate_local_device_urls(_ex)` as a callback, where here its
+//! both). Six check arguments first: `tobii_calibration_start` its eye,
+//! `tobii_calibration_apply` its blob, `tobii_wait_for_callbacks` its count
+//! and null handles, and the three per-eye calibration calls the out pointer
+//! and the eye selection they take, as 4.25 does (see `calibration`). The
+//! DLL checks the handle, and sometimes more, before the callback flag, so
+//! the two differ only for an invalid argument passed from inside a callback.
+//! Two check no callback, as in 4.1: `tobii_set_display_info`, which checks
+//! its pointers only (where 4.25 refuses a call from inside a callback once
+//! they check out), and `tobii_set_fw_upgrade_allowed`, which checks
+//! nothing, in 4.25 too; nor do the three stubs, which read no argument (see
+//! `stub`). The DLL also refuses only calls into the API instance whose
+//! callbacks run, where here any is refused, and it counts the receiver of
+//! `tobii_enumerate_local_device_urls(_ex)` as a callback, where here its
 //! `# Safety` section forbids re-entry.
 //!
 //! `tobii_calibration_parse` checks in the DLL's order: a null `api` or

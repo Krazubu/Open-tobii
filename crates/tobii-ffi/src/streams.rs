@@ -103,7 +103,9 @@ stream_pair! {
     /// eye's place in the camera image and its distance from the tracker,
     /// normalised to about `0..1` per axis (see `tobii_streams.h`).
     tobii_eye_position_normalized_subscribe / tobii_eye_position_normalized_unsubscribe: eye_position, EyePairFn;
-    /// User presence, reported once on subscribe and then on change.
+    /// User presence, reported once on subscribe and then on change; not on
+    /// subscribe while `tobii_presence_subscribe` already holds presence on
+    /// the device (see there).
     tobii_user_presence_subscribe / tobii_user_presence_unsubscribe: presence, PresenceFn;
     /// The Stream Engine's head pose, from the tracker's IR images (see
     /// [`HeadPose`](crate::types::HeadPose)): absolute, in the display
@@ -121,14 +123,44 @@ stream_pair! {
     /// than a stream, and the current reference marks it deprecated; here
     /// both are fed from the daemon's one presence stream, so a subscriber
     /// to either sees the same changes.
+    ///
+    /// So a subscribe to either while the other already holds presence on
+    /// the device is not told the presence standing then, and hears of it at
+    /// its next change: the device's mask is unchanged, so nothing is asked
+    /// of tobiid (`Device::subscribe`), which reports the standing presence
+    /// only to a connection newly asking for it. Nothing chose that. In the
+    /// DLL the two are separate subscriptions, this one to its property 0x14
+    /// (0x18007c365).
     tobii_presence_subscribe / tobii_presence_unsubscribe: presence_sample, PresenceSampleFn;
     /// The responsive combined gaze point (`tobii_stream_t` 12, the stream
     /// 4.25 adds): the tracker's own "Remote Gaze Point Responsive
-    /// Combined", stream 0x83 key `0x20` with validity `0x1f`, which reaches
-    /// this library in the daemon's `GAZE_RAW` message as the combined point
-    /// — the less filtered point the ET5 sends beside the one
-    /// `tobii_gaze_point_subscribe` delivers. It rides on the same daemon
-    /// stream as raw gaze, so subscribing to it alone starts that stream.
+    /// Combined", stream 0x83 key `0x20` with validity `0x1f`, the
+    /// unfiltered point the ET5 sends beside the filtered one
+    /// `tobii_gaze_point_subscribe` delivers (see
+    /// `crates/tobii-proto/src/gaze83.rs`). tobiid reads it from every gaze
+    /// frame and puts it, with the frame's host time, in the tail of its
+    /// raw-gaze record (see
+    /// [`tobii_ipc::GazeRaw::responsive_gaze_point_on_display`]); a tobiid
+    /// from before the tail feeds nothing. Its timestamp is that host time,
+    /// its position is in normalised display coordinates as the gaze point's
+    /// is, and it is valid only while the tracker's validity word is 1, as
+    /// the gaze point is.
+    ///
+    /// For a tracker the DLL drives itself it most likely refuses the
+    /// subscribe: its stream check answers for 12 as for the gaze point
+    /// (0x1800915c0), but its subscribe maps 12 to PRP stream 0x1d,
+    /// `RESPONSIVE_GAZE_POINT` (0x18008f005), and for a tracker the DLL
+    /// drives itself its legacy-TTP module answers that stream's subscribe
+    /// with the stub 0x1800a1cb0 (`mov $0x3,%eax; ret`,
+    /// `PLATMOD_ERROR_NOT_SUPPORTED`; case at 0x180109300), as it does for
+    /// the device log and the 3-D facial landmarks. That it hands out key
+    /// `0x20` behind the Tobii service is inferred from the names alone;
+    /// here the key is the tracker's own, so the stream hands out what it is
+    /// for. The user position guide is handed out on the same policy, though
+    /// the DLL's legacy-TTP path never reports it.
+    ///
+    /// It rides on the same daemon stream as raw gaze, so subscribing to it
+    /// alone starts that stream.
     tobii_responsive_gaze_point_subscribe / tobii_responsive_gaze_point_unsubscribe: responsive_gaze, GazePointFn;
     /// The user position guide: the tracker's own User 3D Position Guide,
     /// each eye's place in the camera image and a depth that rises with its

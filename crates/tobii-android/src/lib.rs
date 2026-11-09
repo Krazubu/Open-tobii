@@ -8,6 +8,11 @@
 //! store that [`latestGaze`] reads back. The Kotlin side is expected to
 //! poll it on a timer.
 
+// A proof of concept: the workspace's strict restriction lints are relaxed
+// here. The in-process Mutexes `unwrap` their locks (a poisoned lock is not
+// recoverable in a single-process PoC), and the panic paths are the PoC's own.
+#![allow(clippy::unwrap_used, clippy::missing_panics_doc)]
+
 mod calibration;
 
 use std::sync::{Mutex, OnceLock};
@@ -60,7 +65,9 @@ fn drain_loop() {
     loop {
         std::thread::sleep(Duration::from_millis(16));
         let mut guard = engine_slot().lock().unwrap();
-        let Some(engine) = guard.as_mut() else { continue };
+        let Some(engine) = guard.as_mut() else {
+            continue;
+        };
         for sample in engine.drain() {
             if let Sample::Gaze(g) = sample {
                 *latest_slot().lock().unwrap() = LatestGaze {
@@ -123,7 +130,12 @@ pub extern "system" fn Java_com_tobiilinux_poc_NativeBridge_latestGaze(
     _class: JClass,
 ) -> jdoubleArray {
     let g = *latest_slot().lock().unwrap();
-    let values = [g.x, g.y, f64::from(i32::from(g.valid)), g.device_ts_us as f64];
+    let values = [
+        g.x,
+        g.y,
+        f64::from(i32::from(g.valid)),
+        g.device_ts_us as f64,
+    ];
     let out = env.new_double_array(4).expect("new_double_array");
     env.set_double_array_region(&out, 0, &values)
         .expect("set_double_array_region");
@@ -187,7 +199,9 @@ pub extern "system" fn Java_com_tobiilinux_poc_NativeBridge_calibrationCompute(
     _env: JNIEnv,
     _class: JClass,
 ) -> jint {
-    let Some(commands) = commands() else { return -1 };
+    let Some(commands) = commands() else {
+        return -1;
+    };
     match calibration::compute(&commands) {
         #[allow(clippy::cast_possible_wrap)]
         Ok(id) => id as jint,
@@ -226,7 +240,5 @@ pub extern "system" fn Java_com_tobiilinux_poc_NativeBridge_lastCalibrationError
     _class: JClass,
 ) -> jstring {
     let message = last_error_slot().lock().unwrap().clone();
-    env.new_string(message)
-        .expect("new_string")
-        .into_raw()
+    env.new_string(message).expect("new_string").into_raw()
 }

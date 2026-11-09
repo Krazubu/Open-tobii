@@ -1,5 +1,5 @@
 #!/bin/sh
-# Before tobii-linux is removed or replaced. dpkg passes "remove" when it is
+# Before open-tobii is removed or replaced. dpkg passes "remove" when it is
 # removed ("upgrade" when a new version replaces it), rpm the number of
 # versions left afterwards (0 when it is removed). Only a removal stops the
 # socket from coming back at every login.
@@ -11,7 +11,7 @@ esac
 # The tarball's install under /usr/local, if there is one too, has its own
 # tobiid.socket under the same name, and so the same one enablement link:
 # leave it to that install.
-if [ -f /usr/local/share/tobii-linux/installed-files ]; then
+if [ -f /usr/local/share/open-tobii/installed-files ]; then
 	exit 0
 fi
 

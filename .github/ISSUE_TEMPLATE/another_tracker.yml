@@ -9,37 +9,48 @@ body:
         Another model is not a small change: the driver replays an
         initialisation captured from that one tracker, and a different
         generation answers a different stream catalogue, carries different
-        properties and may speak a different protocol version.
+        properties and may speak a different protocol version. Nor can
+        anything in this repository ask a tracker with another USB id: the
+        daemon and the research tools look for `2104:0313` and open nothing
+        else.
 
-        What makes this tractable is three of its answers. You can collect them
-        without a Windows machine if the daemon gets far enough to log them; if
-        it does not, a USB capture of the vendor's own driver starting the
-        tracker is what it takes. `tools/abi/README.md` explains the format.
+        What makes this tractable is three of its answers: the stream
+        catalogue (command 1200), the identity strings (1420: serial, model,
+        generation, firmware) and the property list (1330).
+        `tools/abi/README.md` says what the Stream Engine decides from each.
+        They should be in a USB capture taken while Tobii's own software
+        starts the tracker; the Eye Tracker 5's came from one taken on Windows
+        with USBPcap. The tracker can also be passed through to a Windows
+        virtual machine and captured on the Linux host with usbmon.
 
   - type: input
     id: model
     attributes:
       label: Model and USB id
+      description: "`lsusb` lists it; Tobii's vendor id is `2104`."
       placeholder: "Eye Tracker 5L, 2104:03xx"
     validations:
       required: true
 
   - type: textarea
-    id: facts
+    id: capture
     attributes:
-      label: What the tracker reports
+      label: A capture of Tobii's software starting it
       description: |
-        If the daemon starts at all, its `device ready` line carries the model,
-        firmware, integration type and the stream columns; paste it. Otherwise
-        paste whatever it logs while failing.
-      render: text
+        Say whether you have one or could take one, and which of Tobii's
+        programs, at which version, started the tracker. Do not attach the
+        capture: it holds the tracker's serial number (the first string of
+        the 1420 answer, and the USB serial-number descriptor) and, if it ran
+        on past the start, may hold the tracker's camera images of your face.
+        If you have one, say so and keep it: the three answers can be cut out
+        of it without the serial, and the maintainer will follow up here.
 
   - type: textarea
     id: willing
     attributes:
-      label: Can you run probes on it?
+      label: Could you run a probe on it?
       description: |
-        The read-only ones (`tobii5-init-replay state-probe --reads`,
-        `stream-probe --columns --no-start`) send nothing that changes the
-        tracker's state. Say whether you are able and willing to run those —
-        it is the difference between guessing and knowing.
+        No probe can open another USB id yet. One written for yours would
+        join `tobii5-init-replay`, which runs from a source build
+        (INSTALL.md §2) and is in no package. Say whether you could build
+        and run it — it is the difference between guessing and knowing.

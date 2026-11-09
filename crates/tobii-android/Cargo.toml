@@ -17,7 +17,7 @@ tobii-ipc.workspace = true
 tobii-proto.workspace = true
 # Gaze only: no head-pose/ONNX Runtime, whose prebuilt Android binaries
 # don't link cleanly against the NDK's libc++_shared.
-tobii-usb = { workspace = true, default-features = false }
+tobii-usb = { workspace = true }
 
 [lints]
 workspace = true

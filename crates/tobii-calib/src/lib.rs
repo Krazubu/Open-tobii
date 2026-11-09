@@ -6,9 +6,12 @@
 //! of it is opaque. What is understood — the header and the trailing list of
 //! calibration points — is in [`blob`]; [`store`] keeps one blob per user so
 //! the daemon can replace the calibration embedded in its init replay with
-//! the user's own.
+//! the user's own, and [`display`] the display area it was made on.
 
 pub mod blob;
+pub mod display;
 pub mod store;
+#[cfg(any(test, feature = "testing"))]
+pub mod testing;
 
 pub use blob::{BlobError, BlobHeader, BlobInfo, PointRecord, STIMULUS_POINTS};

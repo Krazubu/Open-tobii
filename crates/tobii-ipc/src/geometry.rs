@@ -246,8 +246,8 @@ mod tests {
         }
     }
 
-    /// The display area the Windows engine sent at init (command 1440, the
-    /// author's monitor).
+    /// The display area the Windows engine sent at init (command 1440):
+    /// 633.6 x 334.3 mm.
     fn captured_area() -> DisplayArea {
         DisplayArea {
             top_left_mm: [
