@@ -86,7 +86,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          out="tobii-linux-${GITHUB_REF_NAME}-macos-${{ matrix.name }}"
+          out="open-tobii-${GITHUB_REF_NAME}-macos-${{ matrix.name }}"
           mkdir "$out"
           cp "target/${{ matrix.target }}/release/tobiid" "$out/"
           cp "target/${{ matrix.target }}/release/tobii-calibrate" "$out/"
@@ -96,8 +96,8 @@ jobs:
       - name: Keep the archive
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: tobii-linux-macos-${{ matrix.name }}
-          path: tobii-linux-*-macos-${{ matrix.name }}.tar.gz
+          name: open-tobii-macos-${{ matrix.name }}
+          path: open-tobii-*-macos-${{ matrix.name }}.tar.gz
           if-no-files-found: error
 
   android:
@@ -152,13 +152,13 @@ jobs:
         run: |
           set -euo pipefail
           apk=$(find android/app/build/outputs/apk -name '*.apk' | head -n1)
-          cp "$apk" "tobii-android-${GITHUB_REF_NAME}.apk"
+          cp "$apk" "open-tobii-android-${GITHUB_REF_NAME}.apk"
 
       - name: Keep the APK
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: tobii-android-apk
-          path: tobii-android-*.apk
+          name: open-tobii-android-apk
+          path: open-tobii-android-*.apk
           if-no-files-found: error
 
   publish:
