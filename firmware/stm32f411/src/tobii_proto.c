@@ -31,7 +31,9 @@ bool tobii_is_gaze_frame(const uint8_t *f, size_t len) {
  */
 static float fixed32_gaze_norm(const uint8_t *v) {
     int64_t raw = be64_signed(v);
-    return (float)((double)raw / 4294967296.0 / 1024.0);
+    /* raw / 2^32 / 1024, in float (display precision is ample, and the MCU
+     * build forbids double). */
+    return (float)raw / (4294967296.0f * 1024.0f);
 }
 
 /*
