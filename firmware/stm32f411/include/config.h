@@ -11,11 +11,15 @@
 #define OPEN_TOBII_ENABLE_DISPLAY 0
 #endif
 
-/* SSD1306 panel geometry (used only when the display is enabled). */
-#define OPEN_TOBII_OLED_WIDTH 72
-#define OPEN_TOBII_OLED_HEIGHT 40
-/* The 72x40 panel sits offset inside a 128x64 controller RAM. */
-#define OPEN_TOBII_OLED_COL_OFFSET 28
+/*
+ * OLED panel geometry (used only when the display is enabled). Default: a 2.42"
+ * 128x64 panel (SSD1306/SSD1309 — compatible command set), full width, no
+ * column offset. For the 0.42" 72x40 panel use 72 / 40 / offset 28.
+ */
+#define OPEN_TOBII_OLED_WIDTH 128
+#define OPEN_TOBII_OLED_HEIGHT 64
+#define OPEN_TOBII_OLED_COL_OFFSET 0
+/* 7-bit I2C address (0x3C -> 0x78 on the wire; 0x3D -> 0x7A). */
 #define OPEN_TOBII_OLED_I2C_ADDR 0x3C
 
 /*

@@ -7,7 +7,7 @@
 
 /* Send a command stream: control byte 0x00, then the commands. */
 static bool cmd(struct ssd1306 *d, const uint8_t *c, size_t n) {
-    uint8_t buf[24];
+    uint8_t buf[48];
     if (n + 1 > sizeof buf) return false;
     buf[0] = 0x00; /* Co=0, D/C#=0: all following bytes are commands */
     for (size_t i = 0; i < n; i++) buf[1 + i] = c[i];
