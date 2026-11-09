@@ -297,6 +297,9 @@ pub unsafe fn open_tobii_with_fd(
     ctx: &UsbContext,
     fd: std::os::fd::RawFd,
 ) -> Result<rusb::DeviceHandle<UsbContext>> {
+    // SAFETY: this `unsafe fn`'s contract (see # Safety) is that `fd` is a
+    // valid, open descriptor for exactly a supported Tobii tracker, which is
+    // what `open_device_with_fd` requires.
     let h = unsafe { ctx.open_device_with_fd(fd) }.context(OPEN_DEVICE)?;
     h.claim_interface(IFACE).context(CLAIM_INTERFACE)?;
     debug!(interface = IFACE, "claimed interface (fd-wrapped device)");
@@ -898,6 +901,8 @@ fn gaze_engine_attempt(
     opens: &mut Opens,
 ) -> Result<()> {
     let mut h = match android_fd() {
+        // SAFETY: `android_fd()` returns the descriptor Android's UsbManager
+        // opened for this very device, valid for the engine's lifetime.
         Some(fd) => unsafe { open_tobii_with_fd(ctx, fd) }?,
         None => open_tobii(ctx)?,
     };

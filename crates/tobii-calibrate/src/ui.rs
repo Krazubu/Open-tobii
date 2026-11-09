@@ -33,7 +33,9 @@ use crate::setup::{Choice, Start, Ticks};
 /// The window's Wayland app id and X11 `WM_CLASS`: desktops match it to
 /// `tobii-calibrate.desktop` (its file name and `StartupWMClass`) to show the
 /// window with that entry's name and icon. Unnamed, a Wayland window carries
-/// no app id at all.
+/// no app id at all. Only the Wayland/X11 window naming uses it, so it is
+/// Linux-only like that path.
+#[cfg(target_os = "linux")]
 const APP_ID: &str = "tobii-calibrate";
 
 const BACKGROUND: u32 = rgb(22, 22, 26);
