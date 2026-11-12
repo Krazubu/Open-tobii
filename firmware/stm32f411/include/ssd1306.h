@@ -1,7 +1,7 @@
 /*
  * SSD1306 OLED driver (monochrome framebuffer), hardware-agnostic.
  *
- * Geometry comes from config.h (default 72x40, the 0.42" panel). I2C is done
+ * Geometry comes from config.h (default 128x64; 72x40 for the 0.42" panel). I2C is done
  * through a caller-supplied write callback, so the same driver serves the
  * bare-metal bring-up demo and, later, the HAL-based firmware.
  */

@@ -5,10 +5,11 @@ Tobii tracker (Eye Tracker 5 `2104:0313`, Pro Spark `2104:031C`) over USB,
 **with no PC** — the tracker plugs straight into the MCU — and optionally shows
 the point on a small OLED.
 
-> Status: **scaffold / work in progress.** This directory holds the design, the
-> portable protocol layer (`src/tobii_proto.c`, no hardware dependency) and the
-> glue skeleton. The USB-Host middleware integration and the on-hardware
-> bring-up are the next steps (see [Milestones](#milestones)).
+> Status: **works on hardware.** A Black Pill F411 enumerates an Eye Tracker 5
+> at Full-Speed, replays the init, reads the gaze stream and draws the gaze
+> point on a 128×64 OLED. The USB host is [TinyUSB](https://github.com/hathach/tinyusb);
+> the app is [`tobii_gaze/`](tobii_gaze). Button-triggered calibration is not
+> wired in yet (see [Milestones](#milestones)).
 
 ## Why a new firmware (and not "tobii-linux on the MCU")
 
@@ -38,17 +39,23 @@ truth), see [`src/tobii_proto.c`](src/tobii_proto.c).
 - **USB OTG**: the tracker connects to the OTG_FS pins (PA11 D−, PA12 D+) via a
   USB-OTG adapter. A **Y-OTG adapter that injects external 5 V** is recommended
   — the tracker draws more than a bus-powered board should source.
-- **OLED (optional)**: SSD1306 72×40 (the 0.42" panel) or any SSD1306, on I²C1
-  (PB6 SCL, PB7 SDA by default — see [`include/config.h`](include/config.h)).
+- **OLED (optional)**: SSD1306/SSD1309, 128×64 by default (tested on a 2.42"
+  panel at I²C address `0x3C`), on I²C1 — PB6 SCL, PB7 SDA (see
+  [`include/config.h`](include/config.h)).
 
 ### ⚠️ Full-Speed caveat (the main risk)
 
-The F411's USB host is **Full-Speed only (12 Mbps)**. The Tobii trackers are
-**high-speed** devices; on a FS host they must fall back to Full-Speed, but
-whether their firmware *streams gaze correctly at FS* is **unverified** — this is
-the experiment. Gaze is low-bandwidth, so it is plausible. If it fails, the path
-is an **STM32H7 + ULPI PHY** (true high-speed). The image stream never fits FS,
-which is fine: we only want gaze.
+The F411's USB host is **Full-Speed only (12 Mbps)**; the Tobii trackers are
+high-speed devices. **Verified on hardware: the Eye Tracker 5 falls back to
+Full-Speed and streams gaze correctly.** The image stream would not fit FS,
+which is fine: only gaze is read.
+
+One thing that matters at FS: EP `0x83` must be read **continuously**, with a
+read always pending (re-submitted from its own completion callback) and
+started **before** the init replay, so the device's responses are drained
+while the init is written to EP `0x05` — as the daemon's
+`replay_init_packets` does. Writing the whole init first and reading after
+leaves the stream stalled.
 
 ## Protocol (what the firmware does on the wire)
 
@@ -83,8 +90,11 @@ firmware pushed to the repo builds without it (and without the display driver):
 #define OPEN_TOBII_ENABLE_DISPLAY 0   // 1 to build the OLED gaze dot
 ```
 
-With it off, the firmware still enumerates, streams and decodes gaze (reported
-over the debug UART / USB-CDC console); with it on, it also draws the dot.
+With it off, the firmware still enumerates, streams and decodes gaze; the
+board LED is the only feedback (on once the tracker is enumerated, blinking at
+~2 Hz while valid gaze arrives). With it on (`make OLED=1`), the OLED shows the
+bring-up stage as bars — 1 enumerated, 2 pipes + vendor control, 3 init
+replayed, 4 first EP `0x83` frame — then the moving gaze dot.
 
 ## Calibration (button)
 
@@ -106,27 +116,45 @@ Two things to settle on hardware:
   blob READ (1100) then WRITTEN back (1110) is marked TODO in `tobii_calib.c` —
   validate against `crates/tobiid/src/calibration.rs`.
 
-## Build
+## Build & flash
 
-Not wired to a build system yet. Intended: an STM32CubeIDE / CubeMX project (or
-a Makefile + `arm-none-eabi-gcc` + STM32CubeF4 HAL and USB_HOST middleware) that
-compiles `src/*.c` with the CubeMX-generated HAL. The portable layer
-(`tobii_proto.c`) has **no HAL dependency** and can be unit-tested on the host:
+Needs `arm-none-eabi-gcc`, `make`, `git` and `python3`. TinyUSB and the STM32F4
+CMSIS/HAL are not vendored: a script fetches them, at the commits verified on
+hardware, into `usb/` (ignored by git).
 
 ```sh
-cc -I include -o /tmp/t src/tobii_proto.c tools/test_decode.c && /tmp/t   # TODO
+cd firmware/stm32f411
+python3 tools/gen_init_packets.py ../../crates/tobii-usb/init_packets_ep.txt > include/tobii_init.h
+tools/setup_tinyusb.sh                # once
+cd tobii_gaze
+make BOARD=stm32f411blackpill         # LED only
+make BOARD=stm32f411blackpill OLED=1  # with the OLED gaze dot
 ```
+
+The image is `_build/stm32f411blackpill/tobii_gaze.bin` (~23 KB flash, ~11 KB
+RAM). Flash it over DFU (hold BOOT0, reset, connect the board to the computer),
+e.g. with `dfu-util -a 0 -s 0x08000000:leave -D tobii_gaze.bin` or
+STM32CubeProgrammer (`STM32_Programmer_CLI -c port=usb1 -w tobii_gaze.bin 0x08000000 -v -g 0x08000000`).
+The board has a single USB port: unplug the computer, then connect the tracker
+through the OTG adapter with external power.
+
+[`bringup/`](bringup) is a bare-metal OLED demo (no USB) that checks the wiring
+and the flash cycle. The portable layer (`tobii_proto.c`) has no hardware
+dependency and can be built and tested on the host.
+
+The older [`src/main.c`](src/main.c) / [`include/tobii_host.h`](include/tobii_host.h)
+are the HAL-based scaffold the calibration flow was sketched in; they are not
+part of the build.
 
 ## Milestones
 
-1. **[done]** Portable protocol layer + design (this scaffold).
-2. CubeMX project: OTG_FS **host**, I²C1, UART; USB_HOST middleware.
-3. Enumerate the tracker and read its SCP metadata (req 48) — proves the FS host
-   link works at all.
-4. Replay the init (embedded from `init_packets_ep.txt`) and read EP `0x83`.
-5. Decode `0x500`, print gaze over the console — **proves FS gaze works.**
-6. SSD1306 driver + the gaze dot (behind `OPEN_TOBII_ENABLE_DISPLAY`).
-7. Button → `tobii_calib_run`: validate the calibration sequence and the apply
-   step on hardware; settle the stimulus surface.
-
-Milestone 3/5 is the go/no-go for the Full-Speed bet.
+1. **[done]** Portable protocol layer + design.
+2. **[done]** USB host (TinyUSB, OTG_FS), I²C1 OLED driver.
+3. **[done]** Enumerate the tracker, vendor control setup — the FS host link works.
+4. **[done]** Replay the init and read EP `0x83`.
+5. **[done]** Decode `0x500` — **gaze works at Full-Speed.**
+6. **[done]** The OLED gaze dot (behind `OPEN_TOBII_ENABLE_DISPLAY`).
+7. Button → `tobii_calib_run` in the TinyUSB app: validate the calibration
+   sequence and the apply step on hardware; settle the stimulus surface.
+8. Port `tlv.rs::keyed_fields` exactly into `tobii_decode_gaze` (the current
+   walk is a heuristic that works on the ET5's frames) and add a host test.

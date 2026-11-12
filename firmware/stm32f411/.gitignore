@@ -10,3 +10,7 @@
 firmware/stm32f411/bringup/oled_demo.elf
 firmware/stm32f411/bringup/oled_demo.bin
 firmware/stm32f411/bringup/oled_demo.map
+# TinyUSB + deps, fetched by tools/setup_tinyusb.sh
+/usb/
+# TinyUSB make output
+_build/
