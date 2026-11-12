@@ -1,0 +1,16 @@
+# Generated from crates/tobii-usb/init_packets_ep.txt by tools/gen_init_packets.py
+/include/tobii_init.h
+# Build artifacts
+/build/
+*.o
+*.elf
+*.bin
+*.hex
+*.map
+firmware/stm32f411/bringup/oled_demo.elf
+firmware/stm32f411/bringup/oled_demo.bin
+firmware/stm32f411/bringup/oled_demo.map
+# TinyUSB + deps, fetched by tools/setup_tinyusb.sh
+/usb/
+# TinyUSB make output
+_build/
