@@ -1,0 +1,97 @@
+# Release binaries for every supported OS/arch: on a `v*` tag, build
+# `ttpbridge` and `ttpclient` for each target and attach the archives to that
+# tag's GitHub release. Can also be run by hand (`workflow_dispatch`), where it
+# builds and keeps the archives as the run's artifacts without publishing.
+#
+# libusb is vendored (rusb "vendored"), so each target only needs its Rust
+# toolchain and a C compiler, both present on the runners.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: macos-arm64,   os: macos-14,       target: aarch64-apple-darwin }
+          - { name: macos-x64,     os: macos-14,       target: x86_64-apple-darwin }
+          - { name: windows-x64,   os: windows-latest, target: x86_64-pc-windows-msvc }
+          - { name: windows-x86,   os: windows-latest, target: i686-pc-windows-msvc }
+          - { name: windows-arm64, os: windows-11-arm, target: aarch64-pc-windows-msvc }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Add the target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }} --bins
+
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="ttpbridge-${GITHUB_REF_NAME}-${{ matrix.name }}"
+          mkdir "$out"
+          cp "target/${{ matrix.target }}/release/ttpbridge" "$out/"
+          cp "target/${{ matrix.target }}/release/ttpclient" "$out/"
+          cp README.md LICENSE "$out/" 2>/dev/null || true
+          tar czf "$out.tar.gz" "$out"
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="ttpbridge-${GITHUB_REF_NAME}-${{ matrix.name }}"
+          mkdir "$out"
+          cp "target/${{ matrix.target }}/release/ttpbridge.exe" "$out/"
+          cp "target/${{ matrix.target }}/release/ttpclient.exe" "$out/"
+          cp README.md LICENSE "$out/" 2>/dev/null || true
+          7z a "$out.zip" "$out"
+
+      - name: Keep the archive
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ttpbridge-${{ matrix.name }}
+          path: |
+            ttpbridge-*-${{ matrix.name }}.tar.gz
+            ttpbridge-*-${{ matrix.name }}.zip
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    # Publish whatever built: a target that fails does not sink the release.
+    if: always() && github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Gather the archives
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "$GITHUB_REF_NAME" dist/*
+          --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes
+          --title "tobii-et5-bridge ${GITHUB_REF_NAME#v}"

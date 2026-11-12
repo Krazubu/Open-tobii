@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Runs ttpbridge as root at boot. Install with:
+    sudo cp target/release/ttpbridge /usr/local/bin/
+    sudo cp packaging/com.github.krazubu.tobii-et5-bridge.plist /Library/LaunchDaemons/
+    sudo launchctl load -w /Library/LaunchDaemons/com.github.krazubu.tobii-et5-bridge.plist
+  ttpbridge exits when the tracker is absent or unplugged; launchd restarts it
+  every 10 seconds until it is back.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.github.krazubu.tobii-et5-bridge</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/ttpbridge</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>StandardErrorPath</key>
+    <string>/var/log/tobii-et5-bridge.log</string>
+</dict>
+</plist>
