@@ -197,7 +197,9 @@ impl Replies {
     }
 }
 
-/// What the Bonjour TXT record says about the tracker.
+/// What the Bonjour TXT record says about the tracker. Only read where
+/// there is a Bonjour API to give it to (macOS).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub struct Advert {
     pub serial: String,
     pub model: String,
@@ -215,6 +217,7 @@ impl Advert {
         }
     }
 
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     fn txt_record(&self) -> Vec<u8> {
         let entries = [
             ("model", self.model.as_str()),
