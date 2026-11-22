@@ -4,7 +4,7 @@
 #
 #   * linux   — the packages (`make package`, in packaging/Containerfile)
 #   * macos   — tobiid + tobii-calibrate for Apple Silicon and Intel 64-bit
-#   * android — the proof-of-concept APK (arm64-v8a + armeabi-v7a)
+#   * android — the proof-of-concept APKs, one for arm64-v8a, one for armeabi-v7a
 #   * bridge  — ttpbridge + ttpclient (crates/tobii-bridge) for macOS and
 #               Windows, with libusb built from source (`vendored`)
 #
@@ -148,18 +148,21 @@ jobs:
         with:
           gradle-version: "8.10.2"
 
-      - name: Build the APK
+      # ABI splits (app/build.gradle.kts): app-<abi>-debug.apk for each ABI.
+      - name: Build the APKs
         working-directory: android
         run: gradle assembleDebug --no-daemon
 
-      - name: Name the APK after the tag
+      - name: Name the APKs after the tag and their ABI
         shell: bash
         run: |
           set -euo pipefail
-          apk=$(find android/app/build/outputs/apk -name '*.apk' | head -n1)
-          cp "$apk" "open-tobii-android-${GITHUB_REF_NAME}.apk"
+          for abi in arm64-v8a armeabi-v7a; do
+            cp "android/app/build/outputs/apk/debug/app-${abi}-debug.apk" \
+              "open-tobii-android-${GITHUB_REF_NAME}-${abi}.apk"
+          done
 
-      - name: Keep the APK
+      - name: Keep the APKs
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: open-tobii-android-apk

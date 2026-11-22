@@ -33,11 +33,18 @@ screen runs the same captured command sequence as the daemon's own
    `app/src/main/jniLibs/arm64-v8a/libtobii_android.so` and
    `libc++_shared.so`.)
 
-3. Build the APK (needs a JDK 17+ on `JAVA_HOME`):
+3. Build the APKs (needs a JDK 17+ on `JAVA_HOME`):
 
    ```sh
    gradle assembleDebug
    ```
+
+   One APK per ABI, in `app/build/outputs/apk/debug/`:
+   `app-arm64-v8a-debug.apk` (head pose through ONNX Runtime) and
+   `app-armeabi-v7a-debug.apk` (through tract). Install the one for the
+   device's ABI (`adb shell getprop ro.product.cpu.abi`); the arm64 one for
+   any current phone. An ABI built without its library under `jniLibs/` gives
+   an APK that cannot run.
 
 ## Running
 

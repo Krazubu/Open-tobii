@@ -38,8 +38,8 @@ companion bridge for Windows/macOS, multi-OS release binaries, and a rebrand to
   file descriptor `android.hardware.usb.UsbManager` hands out.
 - An on-device **calibration screen** that runs the same captured command
   sequence as the daemon, directly against the engine.
-- Native library built for **`arm64-v8a` and `armeabi-v7a`**, shipped as a
-  universal APK.
+- Native library built for **`arm64-v8a` and `armeabi-v7a`**, shipped as one
+  APK per ABI (it was a universal APK).
 - **Head pose**: the `arm64-v8a` library links ONNX Runtime (`ort`'s
   prebuilt binary, with the NDK 27's `libc++_shared.so` beside it), the
   `armeabi-v7a` one runs the models on tract; the app gains a *Head pose*

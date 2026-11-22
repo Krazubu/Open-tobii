@@ -34,6 +34,18 @@ android {
     // src/main/jniLibs/<abi>/ — the Android Gradle Plugin picks that up
     // without further configuration. No NDK/CMake build here.
     ndkVersion = "27.2.12479018"
+
+    // One APK per ABI rather than a universal one: the arm64 library carries
+    // ONNX Runtime and the armv7 one tract, some 20 MB each, and a device
+    // only ever loads one of them.
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a")
+            isUniversalApk = false
+        }
+    }
 }
 
 dependencies {
