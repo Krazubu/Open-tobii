@@ -32,3 +32,4 @@ __pycache__/
 /android/*/build/
 /android/*/*/build/
 /android/**/jniLibs/
+.DS_Store
