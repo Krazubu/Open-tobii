@@ -15,9 +15,14 @@ jni = "0.21"
 tobii-calib.workspace = true
 tobii-ipc.workspace = true
 tobii-proto.workspace = true
-# Gaze only: no head-pose/ONNX Runtime, whose prebuilt Android binaries
-# don't link cleanly against the NDK's libc++_shared.
 tobii-usb = { workspace = true }
+
+# Head pose on arm64 only: ort ships a prebuilt ONNX Runtime for
+# aarch64-linux-android (linked statically; it needs the NDK's
+# libc++_shared.so in the APK, which the release build copies in), but none
+# for armv7, whose library stays gaze-only.
+[target.'cfg(all(target_os = "android", target_arch = "aarch64"))'.dependencies]
+tobii-usb = { workspace = true, features = ["head-pose"] }
 
 [lints]
 workspace = true

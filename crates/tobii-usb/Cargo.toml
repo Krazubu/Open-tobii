@@ -19,9 +19,9 @@ tracing.workspace = true
 [features]
 default = ["head-pose"]
 # Head-pose inference from the 0x50e image stream (ONNX Runtime, via
-# tobii-pose). Gaze itself (stream 0x500) never needs it; off by default on
-# targets where ONNX Runtime's prebuilt binaries don't link cleanly, such as
-# Android, where a gaze-only build disables this feature.
+# tobii-pose). Gaze itself (stream 0x500) never needs it; off on targets
+# where ort ships no prebuilt ONNX Runtime, such as armv7 Android, whose
+# gaze-only build leaves this feature out.
 head-pose = ["dep:tobii-pose"]
 
 [lints]

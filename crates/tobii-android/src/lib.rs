@@ -21,7 +21,9 @@ use std::time::Duration;
 use jni::JNIEnv;
 use jni::objects::{JClass, JString};
 use jni::sys::{jboolean, jdoubleArray, jint, jstring};
-use tobii_usb::engine::{Engine, Sample};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use tobii_usb::engine::{Engine, HeadPose, Sample, Wanted};
 
 /// The last calibration call's error, if its last call failed: there is no
 /// logcat route for `tracing`/`eprintln` wired up in this minimal bridge, so
@@ -61,6 +63,28 @@ fn latest_slot() -> &'static Mutex<LatestGaze> {
     LATEST.get_or_init(|| Mutex::new(LatestGaze::default()))
 }
 
+#[derive(Clone, Copy, Default)]
+struct LatestPose {
+    head: HeadPose,
+    device_ts_us: i64,
+}
+
+fn latest_pose_slot() -> &'static Mutex<LatestPose> {
+    static LATEST: OnceLock<Mutex<LatestPose>> = OnceLock::new();
+    LATEST.get_or_init(|| Mutex::new(LatestPose::default()))
+}
+
+/// Whether Kotlin wants head poses: kept apart from the engine so that an
+/// engine (re)started later is told too.
+static HEAD_WANTED: AtomicBool = AtomicBool::new(false);
+
+fn apply_wanted(engine: &Engine) {
+    engine.set_wanted(Wanted {
+        head: HEAD_WANTED.load(Ordering::Relaxed),
+        image: false,
+    });
+}
+
 fn drain_loop() {
     loop {
         std::thread::sleep(Duration::from_millis(16));
@@ -69,13 +93,22 @@ fn drain_loop() {
             continue;
         };
         for sample in engine.drain() {
-            if let Sample::Gaze(g) = sample {
-                *latest_slot().lock().unwrap() = LatestGaze {
-                    x: g.frame.gaze.value[0],
-                    y: g.frame.gaze.value[1],
-                    device_ts_us: i64::try_from(g.frame.device_ts_us).unwrap_or(0),
-                    valid: g.frame.gaze.valid,
-                };
+            match sample {
+                Sample::Gaze(g) => {
+                    *latest_slot().lock().unwrap() = LatestGaze {
+                        x: g.frame.gaze.value[0],
+                        y: g.frame.gaze.value[1],
+                        device_ts_us: i64::try_from(g.frame.device_ts_us).unwrap_or(0),
+                        valid: g.frame.gaze.valid,
+                    };
+                }
+                Sample::Pose(p) => {
+                    *latest_pose_slot().lock().unwrap() = LatestPose {
+                        head: p.head,
+                        device_ts_us: p.timestamp_us,
+                    };
+                }
+                _ => {}
             }
         }
     }
@@ -105,7 +138,9 @@ pub unsafe extern "system" fn Java_com_tobiilinux_poc_NativeBridge_startEngine(
         std::env::set_var("TOBII_ANDROID_FD", fd.to_string());
         std::env::set_var("TOBII_NO_RESET", "1");
     }
-    *engine_slot().lock().unwrap() = Some(Engine::start());
+    let engine = Engine::start();
+    apply_wanted(&engine);
+    *engine_slot().lock().unwrap() = Some(engine);
 
     static DRAINER_STARTED: OnceLock<()> = OnceLock::new();
     DRAINER_STARTED.get_or_init(|| {
@@ -137,6 +172,62 @@ pub extern "system" fn Java_com_tobiilinux_poc_NativeBridge_latestGaze(
         g.device_ts_us as f64,
     ];
     let out = env.new_double_array(4).expect("new_double_array");
+    env.set_double_array_region(&out, 0, &values)
+        .expect("set_double_array_region");
+    out.into_raw()
+}
+
+/// Whether this library makes head poses: built with ONNX Runtime, which
+/// only the arm64 one is (`false` in the armv7 library).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_tobiilinux_poc_NativeBridge_headPoseSupported(
+    _env: JNIEnv,
+    _class: JClass,
+) -> jboolean {
+    jboolean::from(tobii_usb::engine::HEAD_POSE)
+}
+
+/// Turns head-pose inference on or off (it costs CPU, so it is off until
+/// asked for). Applies to the running engine and to any started later.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_tobiilinux_poc_NativeBridge_setHeadPoseWanted(
+    _env: JNIEnv,
+    _class: JClass,
+    wanted: jboolean,
+) {
+    HEAD_WANTED.store(wanted != 0, Ordering::Relaxed);
+    if !HEAD_WANTED.load(Ordering::Relaxed) {
+        *latest_pose_slot().lock().unwrap() = LatestPose::default();
+    }
+    if let Some(engine) = engine_slot().lock().unwrap().as_ref() {
+        apply_wanted(engine);
+    }
+}
+
+/// The latest head pose, in the display frame: `[validity (0.0/1.0),
+/// x, y, z (mm), rotation x, y, z (radians, the Stream Engine's yxz
+/// angles), device timestamp (µs)]`. All zero before the first pose, and
+/// while head poses are not wanted.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_tobiilinux_poc_NativeBridge_latestHeadPose(
+    env: JNIEnv,
+    _class: JClass,
+) -> jdoubleArray {
+    let p = *latest_pose_slot().lock().unwrap();
+    let [px, py, pz] = p.head.position_mm;
+    let [rx, ry, rz] = p.head.rotation_rad;
+    #[allow(clippy::cast_precision_loss)]
+    let values = [
+        f64::from(i32::from(p.head.valid)),
+        px,
+        py,
+        pz,
+        rx,
+        ry,
+        rz,
+        p.device_ts_us as f64,
+    ];
+    let out = env.new_double_array(8).expect("new_double_array");
     env.set_double_array_region(&out, 0, &values)
         .expect("set_double_array_region");
     out.into_raw()

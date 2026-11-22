@@ -181,6 +181,10 @@ use tracing::{error, warn};
 
 use crate::device::{CATALOGUE_STREAMS, OpenRefusal};
 
+/// Whether this build makes head poses: without the `head-pose` feature
+/// (no ONNX Runtime), a [`Wanted::head`] never yields a [`PoseSample`].
+pub const HEAD_POSE: bool = cfg!(feature = "head-pose");
+
 /// The Stream Engine's head pose, as [`PoseSample::head`] carries it:
 /// re-exported so that the engine's users need not depend on `tobii_pose`.
 #[cfg(feature = "head-pose")]

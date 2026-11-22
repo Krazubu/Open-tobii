@@ -28,6 +28,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var statusText: TextView
     private lateinit var gazeText: TextView
     private lateinit var calibrateButton: Button
+    private lateinit var headPoseButton: Button
+    private lateinit var headPoseText: TextView
+    private var headPoseWanted = false
     private lateinit var gazeDotView: GazeDotView
     private var connection: android.hardware.usb.UsbDeviceConnection? = null
     private val poll = Handler(Looper.getMainLooper())
@@ -70,6 +73,15 @@ class MainActivity : AppCompatActivity() {
         gazeDotView = findViewById(R.id.gazeDotView)
         calibrateButton.setOnClickListener {
             calibration.launch(Intent(this, CalibrationActivity::class.java))
+        }
+        headPoseButton = findViewById(R.id.headPoseButton)
+        headPoseText = findViewById(R.id.headPoseText)
+        headPoseButton.setOnClickListener {
+            headPoseWanted = !headPoseWanted
+            NativeBridge.setHeadPoseWanted(headPoseWanted)
+            headPoseButton.text = if (headPoseWanted) "Stop head pose" else "Head pose"
+            headPoseText.visibility =
+                if (headPoseWanted) android.view.View.VISIBLE else android.view.View.GONE
         }
         usbManager = getSystemService(Context.USB_SERVICE) as UsbManager
 
@@ -144,6 +156,9 @@ class MainActivity : AppCompatActivity() {
         NativeBridge.startEngine(conn.fileDescriptor)
         statusText.text = "Running"
         calibrateButton.visibility = android.view.View.VISIBLE
+        if (NativeBridge.headPoseSupported()) {
+            headPoseButton.visibility = android.view.View.VISIBLE
+        }
         poll.post(pollTick)
     }
 
@@ -155,6 +170,14 @@ class MainActivity : AppCompatActivity() {
             gazeDotView.point = floatArrayOf(g[0].toFloat(), g[1].toFloat())
             gazeDotView.valid = valid
             gazeDotView.invalidate()
+            if (headPoseWanted) {
+                val h = NativeBridge.latestHeadPose()
+                val deg = 180.0 / Math.PI
+                headPoseText.text = "head %s\nx=%.0f y=%.0f z=%.0f mm\npitch=%.1f° yaw=%.1f° roll=%.1f°".format(
+                    if (h[0] != 0.0) "valid" else "invalid",
+                    h[1], h[2], h[3], h[4] * deg, h[5] * deg, h[6] * deg
+                )
+            }
             poll.postDelayed(this, 33)
         }
     }

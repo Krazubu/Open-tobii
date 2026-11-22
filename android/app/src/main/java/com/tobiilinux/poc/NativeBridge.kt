@@ -20,6 +20,22 @@ object NativeBridge {
     external fun latestGaze(): DoubleArray
 
     /**
+     * Whether this device's library makes head poses: only the arm64 one is
+     * built with ONNX Runtime (the armv7 one is gaze-only).
+     */
+    external fun headPoseSupported(): Boolean
+
+    /** Turns head-pose inference on or off (off by default: it costs CPU). */
+    external fun setHeadPoseWanted(wanted: Boolean)
+
+    /**
+     * `[validity (0.0/1.0), x, y, z (mm), rotation x, y, z (radians),
+     * device timestamp (microseconds)]`, in the display frame. All zero
+     * before the first pose and while head poses are not wanted.
+     */
+    external fun latestHeadPose(): DoubleArray
+
+    /**
      * Starts a calibration session: the captured start/clear/write, seeded
      * from the calibration saved under [storageDir] (the app's own files
      * directory), or the one built into the init replay if none is saved

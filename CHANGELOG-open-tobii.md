@@ -21,8 +21,9 @@ companion bridge for Windows/macOS, multi-OS release binaries, and a rebrand to
   and a drop-in `libtobii` so a 32-bit C program on macOS 10.14 can read gaze
   (tier-3 target; needs a nightly toolchain and the macOS 10.13 SDK).
 - **Gaze-only builds** where ONNX Runtime ships no prebuilt binary (x86_64
-  macOS, Android): head-pose is made optional so the daemon still streams gaze
-  and calibrates. `tobiid` gained a `head-pose` feature (on by default).
+  macOS, 32-bit Android): head-pose is made optional so the daemon still
+  streams gaze and calibrates. `tobiid` gained a `head-pose` feature (on by
+  default).
 - Cross-platform gating of the Linux-only paths (Wayland/X11 window naming and
   startup tokens, `POLLRDHUP`) so the same tree builds on macOS.
 
@@ -35,6 +36,11 @@ companion bridge for Windows/macOS, multi-OS release binaries, and a rebrand to
   sequence as the daemon, directly against the engine.
 - Native library built for **`arm64-v8a` and `armeabi-v7a`**, shipped as a
   universal APK.
+- **Head pose on arm64**: the `arm64-v8a` library links ONNX Runtime (`ort`'s
+  prebuilt binary, with the NDK 27's `libc++_shared.so` beside it) and the
+  app gains a *Head pose* button that turns the inference on. The
+  `armeabi-v7a` library stays gaze-only. Checked with an Eye Tracker 5 on a
+  Retroid Pocket 5 (Android 13).
 
 ## New hardware: Tobii Pro Spark
 

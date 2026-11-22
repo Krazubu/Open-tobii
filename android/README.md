@@ -10,24 +10,26 @@ screen runs the same captured command sequence as the daemon's own
 ## Building
 
 1. Build the native library for your device's ABI (`arm64-v8a` for a current
-   phone or tablet):
+   phone or tablet) with NDK 27 (`ANDROID_NDK_HOME` pointing at
+   `ndk/27.2.12479018`), straight into the directory Gradle picks it up
+   from:
 
    ```sh
-   cargo ndk -t arm64-v8a build -p tobii-android --release
+   cargo ndk -t arm64-v8a --link-libcxx-shared -o app/src/main/jniLibs \
+     build -p tobii-android --release
    ```
 
-   This excludes head-pose/ONNX Runtime (`tobii-usb`'s `head-pose` feature,
-   on by default elsewhere): its prebuilt Android binaries don't link
-   cleanly against the NDK's `libc++_shared`, and gaze itself (stream
-   `0x500`) never needs them.
+   The arm64 library includes head-pose inference (ONNX Runtime, from
+   `ort`'s prebuilt `aarch64-linux-android` binary, linked statically).
+   It needs the NDK's `libc++_shared.so` next to it in the APK, which
+   `--link-libcxx-shared` copies in. `ort` has no prebuilt binary for
+   `armeabi-v7a`, so that library is gaze-only. The app shows a **Head
+   pose** button only when the library has head-pose inference; inference
+   is off until you press it, since it costs CPU.
 
-2. Copy the built library where Gradle picks it up without further
-   configuration:
-
-   ```sh
-   cp ../target/aarch64-linux-android/release/libtobii_android.so \
-     app/src/main/jniLibs/arm64-v8a/
-   ```
+2. (Nothing to copy: `-o` above already wrote
+   `app/src/main/jniLibs/arm64-v8a/libtobii_android.so` and
+   `libc++_shared.so`.)
 
 3. Build the APK (needs a JDK 17+ on `JAVA_HOME`):
 

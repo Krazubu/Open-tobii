@@ -33,7 +33,7 @@ android {
     // The .so (built separately with `cargo ndk`) is checked in under
     // src/main/jniLibs/<abi>/ — the Android Gradle Plugin picks that up
     // without further configuration. No NDK/CMake build here.
-    ndkVersion = "25.1.8937393"
+    ndkVersion = "27.2.12479018"
 }
 
 dependencies {

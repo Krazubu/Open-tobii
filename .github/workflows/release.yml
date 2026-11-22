@@ -128,15 +128,18 @@ jobs:
         run: |
           set -euo pipefail
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;25.1.8937393"
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/25.1.8937393" >> "$GITHUB_ENV"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;27.2.12479018"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
 
       # cargo-ndk's -o writes each ABI's libtobii_android.so straight into
       # app/src/main/jniLibs/<abi>/, where the Android Gradle Plugin finds it.
+      # The arm64 one links ONNX Runtime (head pose), which needs the NDK's
+      # libc++_shared.so beside it: --link-libcxx-shared copies it in.
       - name: Build the native library (arm64 + arm32)
         run: >
           cargo ndk
           -t arm64-v8a -t armeabi-v7a
+          --link-libcxx-shared
           -o android/app/src/main/jniLibs
           build -p tobii-android --release
 
