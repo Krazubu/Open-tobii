@@ -183,18 +183,18 @@ use crate::device::{CATALOGUE_STREAMS, OpenRefusal};
 
 /// Whether this build makes head poses: without the `head-pose` feature
 /// (no ONNX Runtime), a [`Wanted::head`] never yields a [`PoseSample`].
-pub const HEAD_POSE: bool = cfg!(feature = "head-pose");
+pub const HEAD_POSE: bool = cfg!(any(feature = "head-pose", feature = "head-pose-tract"));
 
 /// The Stream Engine's head pose, as [`PoseSample::head`] carries it:
 /// re-exported so that the engine's users need not depend on `tobii_pose`.
-#[cfg(feature = "head-pose")]
+#[cfg(any(feature = "head-pose", feature = "head-pose-tract"))]
 pub use tobii_pose::head::HeadPose;
 
 /// Stand-in for [`tobii_pose::head::HeadPose`] without the `head-pose`
 /// feature, so [`PoseSample`] and [`Sample::Pose`] still compile: a gaze-only
 /// build never produces one of these, as nothing starts the pose worker that
 /// would.
-#[cfg(not(feature = "head-pose"))]
+#[cfg(not(any(feature = "head-pose", feature = "head-pose-tract")))]
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct HeadPose {
     /// Always `false` in this build.
@@ -750,7 +750,7 @@ impl HeadFlag {
     }
 
     /// Whether the flag is set, and was raised since it was `before`.
-    #[cfg(feature = "head-pose")]
+    #[cfg(any(feature = "head-pose", feature = "head-pose-tract"))]
     #[must_use]
     pub(crate) fn is_raised_since(self, before: Self) -> bool {
         self.on && self.raised != before.raised
@@ -787,7 +787,7 @@ impl Shared {
     }
 
     /// The head flag as it is now (read by the pose worker).
-    #[cfg(feature = "head-pose")]
+    #[cfg(any(feature = "head-pose", feature = "head-pose-tract"))]
     pub(crate) fn head(&self) -> HeadFlag {
         *self.head.lock().unwrap_or_else(PoisonError::into_inner)
     }

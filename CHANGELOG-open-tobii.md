@@ -20,10 +20,14 @@ companion bridge for Windows/macOS, multi-OS release binaries, and a rebrand to
 - **Intel 32-bit (`i686-apple-darwin`)**, on the `macos-i386` branch: `tobiid`
   and a drop-in `libtobii` so a 32-bit C program on macOS 10.14 can read gaze
   (tier-3 target; needs a nightly toolchain and the macOS 10.13 SDK).
-- **Gaze-only builds** where ONNX Runtime ships no prebuilt binary (x86_64
-  macOS, 32-bit Android): head-pose is made optional so the daemon still
-  streams gaze and calibrates. `tobiid` gained a `head-pose` feature (on by
-  default).
+- **Gaze-only builds** where ONNX Runtime ships no prebuilt binary: head-pose
+  is made optional so the daemon still streams gaze and calibrates. `tobiid`
+  gained a `head-pose` feature (on by default).
+- **Head pose without ONNX Runtime**: `tobii-pose` can run its two models on
+  [tract](https://github.com/sonos/tract) (pure Rust) instead, the same
+  outputs to about 10⁻³ px but some 2.5x slower. The Intel macOS release of
+  `tobiid` uses it (`--features head-pose-tract`), where it was gaze-only.
+  tract 0.23 needs Rust 1.91; the builds without it keep the 1.88 minimum.
 - Cross-platform gating of the Linux-only paths (Wayland/X11 window naming and
   startup tokens, `POLLRDHUP`) so the same tree builds on macOS.
 
@@ -36,11 +40,11 @@ companion bridge for Windows/macOS, multi-OS release binaries, and a rebrand to
   sequence as the daemon, directly against the engine.
 - Native library built for **`arm64-v8a` and `armeabi-v7a`**, shipped as a
   universal APK.
-- **Head pose on arm64**: the `arm64-v8a` library links ONNX Runtime (`ort`'s
-  prebuilt binary, with the NDK 27's `libc++_shared.so` beside it) and the
-  app gains a *Head pose* button that turns the inference on. The
-  `armeabi-v7a` library stays gaze-only. Checked with an Eye Tracker 5 on a
-  Retroid Pocket 5 (Android 13).
+- **Head pose**: the `arm64-v8a` library links ONNX Runtime (`ort`'s
+  prebuilt binary, with the NDK 27's `libc++_shared.so` beside it), the
+  `armeabi-v7a` one runs the models on tract; the app gains a *Head pose*
+  button that turns the inference on. Both checked with an Eye Tracker 5 on
+  a Retroid Pocket 5 (Android 13).
 
 ## New hardware: Tobii Pro Spark
 

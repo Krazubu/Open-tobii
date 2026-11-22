@@ -12,7 +12,8 @@ publish.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-ort.workspace = true
+ort = { workspace = true, optional = true }
+tract-onnx = { workspace = true, optional = true }
 # The display frame the head pose is in (tobii-ipc depends on libc alone).
 tobii-ipc.workspace = true
 tracing.workspace = true
@@ -21,6 +22,15 @@ tracing.workspace = true
 # decoded before they can be fed to the tracker.
 [dev-dependencies]
 tobii-proto.workspace = true
+
+[features]
+# The inference back-end (see src/infer.rs): ONNX Runtime through ort's
+# prebuilt binaries, or tract, pure Rust, for targets ort has none for
+# (tract needs Rust 1.91, above the workspace's 1.88). With both on, ONNX
+# Runtime is used.
+default = ["ort"]
+ort = ["dep:ort"]
+tract = ["dep:tract-onnx"]
 
 [lints]
 workspace = true

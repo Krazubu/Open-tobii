@@ -19,11 +19,14 @@ tracing.workspace = true
 
 [features]
 # Head-pose inference from the IR image stream (ONNX Runtime, via tobii-usb's
-# `head-pose`). On by default. Turn it off (`--no-default-features`) for a
-# gaze-only daemon on targets where ONNX Runtime ships no prebuilt binary, such
-# as x86_64 macOS.
+# `head-pose`). On by default. Where ort ships no prebuilt ONNX Runtime, such
+# as x86_64 macOS, build with `--no-default-features --features
+# head-pose-tract` for the same head pose on tract (pure Rust, about 2.5x
+# slower; needs Rust 1.91), or with `--no-default-features` alone for a
+# gaze-only daemon.
 default = ["head-pose"]
 head-pose = ["tobii-usb/head-pose"]
+head-pose-tract = ["tobii-usb/head-pose-tract"]
 
 [dev-dependencies]
 tobii-calib = { workspace = true, features = ["testing"] }

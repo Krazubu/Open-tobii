@@ -29,6 +29,12 @@ rand = "0.8"
 # builder and is not Send, which tobii-pose converts), and a requirement of
 # "2.0.0-rc.10" would take any later one, or 2.0.0, on a fresh resolve.
 ort = "=2.0.0-rc.12"
+# Pure-Rust ONNX inference, for the targets ort ships no ONNX Runtime for
+# (tobii-pose's `tract` back-end). Needs Rust 1.91, above the workspace's
+# 1.88, but only builds that turn the `tract` feature on compile it: 0.22.1,
+# the last on 1.85, is some 4.7x slower on the landmark model (55 ms against
+# 12 on an M-series core).
+tract-onnx = "0.23.10"
 rsa = { version = "0.9", features = ["sha2"] }
 rusb = "0.9"
 sha2 = "0.10"
@@ -36,7 +42,8 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tobii-calib = { path = "crates/tobii-calib" }
 tobii-ffi = { path = "crates/tobii-ffi" }
-tobii-pose = { path = "crates/tobii-pose" }
+# No back-end by default: each user picks `ort` or `tract`.
+tobii-pose = { path = "crates/tobii-pose", default-features = false }
 tobii-proto = { path = "crates/tobii-proto" }
 tobii-usb = { path = "crates/tobii-usb", default-features = false }
 tobii-ipc = { path = "crates/tobii-ipc" }

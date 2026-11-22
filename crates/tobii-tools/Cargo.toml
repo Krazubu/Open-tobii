@@ -20,7 +20,7 @@ rusb.workspace = true
 tobii-calib.workspace = true
 tobii-ipc.workspace = true
 tobii-log.workspace = true
-tobii-pose.workspace = true
+tobii-pose = { workspace = true, features = ["ort"] }
 tobii-proto.workspace = true
 tobii-usb = { workspace = true, features = ["head-pose"] }
 tracing.workspace = true

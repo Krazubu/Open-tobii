@@ -23,9 +23,11 @@ screen runs the same captured command sequence as the daemon's own
    `ort`'s prebuilt `aarch64-linux-android` binary, linked statically).
    It needs the NDK's `libc++_shared.so` next to it in the APK, which
    `--link-libcxx-shared` copies in. `ort` has no prebuilt binary for
-   `armeabi-v7a`, so that library is gaze-only. The app shows a **Head
-   pose** button only when the library has head-pose inference; inference
-   is off until you press it, since it costs CPU.
+   `armeabi-v7a`, so that library runs the same models on tract (pure
+   Rust, `tobii-usb`'s `head-pose-tract`, which needs Rust 1.91): slower,
+   and 16 MB instead of 0.5 MB. The app shows a **Head pose** button only
+   when the library has head-pose inference; inference is off until you
+   press it, since it costs CPU (a whole core while it runs).
 
 2. (Nothing to copy: `-o` above already wrote
    `app/src/main/jniLibs/arm64-v8a/libtobii_android.so` and

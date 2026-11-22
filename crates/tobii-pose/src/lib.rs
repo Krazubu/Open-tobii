@@ -1,6 +1,7 @@
 //! Head pose from the tracker's own IR frames.
 //!
-//! [`track`] wraps the `MediaPipe` face-landmark model (ONNX Runtime) and
+//! [`track`] wraps the `MediaPipe` face-landmark model (ONNX Runtime or
+//! tract, see [`infer`]) and
 //! fits the canonical mesh to the landmarks, one [`track::FaceFit`] per frame;
 //! when it loses the face, `MediaPipe`'s `BlazeFace` face detector finds it
 //! again. [`head`] turns the fits into the head pose the Stream Engine
@@ -15,4 +16,5 @@
 mod canonical;
 mod detect;
 pub mod head;
+pub mod infer;
 pub mod track;

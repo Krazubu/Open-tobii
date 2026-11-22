@@ -22,7 +22,10 @@ default = ["head-pose"]
 # tobii-pose). Gaze itself (stream 0x500) never needs it; off on targets
 # where ort ships no prebuilt ONNX Runtime, such as armv7 Android, whose
 # gaze-only build leaves this feature out.
-head-pose = ["dep:tobii-pose"]
+head-pose = ["dep:tobii-pose", "tobii-pose/ort"]
+# The same head pose on tract, pure Rust, for targets ort ships no ONNX
+# Runtime for (armv7 Android, x86_64 macOS): about 2.5x slower.
+head-pose-tract = ["dep:tobii-pose", "tobii-pose/tract"]
 
 [lints]
 workspace = true

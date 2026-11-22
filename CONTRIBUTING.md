@@ -33,7 +33,11 @@ make verify-abi   # the 199 exports, and a C program compiled against the header
 
 CI runs them with Rust 1.99.0, the toolchain the release container pins, and
 a second job checks that the workspace still builds with 1.88, the minimum it
-declares (`cargo +1.88 check --workspace --all-targets --locked`).
+declares (`cargo +1.88 check --workspace --all-targets --locked`). One
+exception: `tobii-pose`'s `tract` back-end (`head-pose-tract`, used by the
+armv7 Android library and the Intel macOS `tobiid`) needs Rust 1.91, as
+tract 0.23 does; 0.22.1, the last on 1.85, runs the landmark model some 4.7x
+slower. The default builds never compile it.
 
 Neither needs a tracker. Ten tests whose inputs are captures of a face read
 them from the paths in `TOBII_IMAGE83_FIXTURE` and `TOBII_POSE_PGM_FIXTURE`,

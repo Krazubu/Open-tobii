@@ -22,9 +22,9 @@ pub mod calibration;
 pub mod device;
 pub mod engine;
 pub mod models;
-#[cfg(feature = "head-pose")]
+#[cfg(any(feature = "head-pose", feature = "head-pose-tract"))]
 mod pose;
-#[cfg(not(feature = "head-pose"))]
+#[cfg(not(any(feature = "head-pose", feature = "head-pose-tract")))]
 #[path = "pose_stub.rs"]
 mod pose;
 mod time_map;

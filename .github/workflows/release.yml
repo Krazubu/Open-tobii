@@ -62,10 +62,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ONNX Runtime (head pose) ships no prebuilt for x86_64 macOS, so the
-          # Intel build is gaze-only; Apple Silicon keeps head pose.
+          # ort ships no ONNX Runtime for x86_64 macOS, so the Intel build
+          # runs head pose on tract (pure Rust) instead.
           - { name: arm64, target: aarch64-apple-darwin, extra: "" }
-          - { name: x64,   target: x86_64-apple-darwin,  extra: "--no-default-features" }
+          - { name: x64,   target: x86_64-apple-darwin,  extra: "--no-default-features --features head-pose-tract" }
     runs-on: macos-14
     timeout-minutes: 45
     permissions:

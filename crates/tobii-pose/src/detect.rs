@@ -1,5 +1,5 @@
 //! Face detection on the camera's own frame, for the tracker to find a face it
-//! has lost: `MediaPipe`'s `BlazeFace` short-range model via ONNX Runtime,
+//! has lost: `MediaPipe`'s `BlazeFace` short-range model (see [`crate::infer`]),
 //! decoded through its SSD anchors and merged by weighted non-maximum
 //! suppression as `MediaPipe`'s face-detection graph does. The frame is
 //! resized to the model's input as `cv2.resize` does it, bit for bit, so that
@@ -7,8 +7,8 @@
 //! validated with.
 
 use anyhow::{Context, Result, ensure};
-use ort::session::Session;
-use ort::value::TensorRef;
+
+use crate::infer::Model;
 
 // MediaPipe's BlazeFace short-range model converted to ONNX; Apache-2.0, see
 // models/README.md.
@@ -61,10 +61,10 @@ pub(crate) struct Detection {
     pub score: f32,
 }
 
-/// The face-detection ONNX session, its anchors and the buffers it reuses on
+/// The face-detection model, its anchors and the buffers it reuses on
 /// every call.
 pub(crate) struct FaceDetector {
-    session: Session,
+    model: Model,
     /// Anchor centres (x, y, as fractions of the input's side), one per
     /// output row, in the order of the rows.
     anchors: Vec<[f64; 2]>,
@@ -76,24 +76,22 @@ pub(crate) struct FaceDetector {
 }
 
 impl FaceDetector {
-    /// Load the embedded face-detection model into a new ONNX Runtime
-    /// session that runs on one thread.
+    /// Load the embedded face-detection model, to run on one thread.
     ///
     /// # Errors
-    /// Fails when ONNX Runtime cannot be initialised or rejects the model.
+    /// Fails when the inference back-end cannot start or rejects the model.
     pub(crate) fn new() -> Result<Self> {
-        // One intra-op thread, as the prototype ran it (0.8 ms a call). In ort
-        // 2.0.0-rc.12 the builder's setters fail with an error that hands the
-        // builder back, which is not Send; convert it to a plain ort::Error.
-        let session = Session::builder()
-            .context("failed to start ONNX Runtime for the face detection model")?
-            .with_intra_threads(1)
-            .map_err(ort::Error::<()>::from)
-            .context("failed to give the face detection model one thread")?
-            .commit_from_memory(MODEL)
-            .context("failed to load face detection model")?;
+        // One intra-op thread, as the prototype ran it (0.8 ms a call).
+        let model = Model::load(
+            MODEL,
+            INPUT,
+            [1, 3, SIDE, SIDE],
+            &[REGRESSORS, CLASSIFICATORS],
+            true,
+        )
+        .context("failed to load face detection model")?;
         Ok(Self {
-            session,
+            model,
             anchors: anchors(),
             input: vec![0f32; 3 * SIDE * SIDE],
             decoder: Decoder::default(),
@@ -107,7 +105,7 @@ impl FaceDetector {
     ///
     /// # Errors
     /// Fails when `frame` holds fewer than `n * n` pixels or `n` is 0, when
-    /// the ONNX session rejects the input or the run fails, or when an output
+    /// the model rejects the input or the run fails, or when an output
     /// is missing, not f32 or not of the model's size. Each error from the
     /// model says it was the face detection model's.
     pub(crate) fn detect(&mut self, frame: &[u8], n: usize) -> Result<&[Detection]> {
@@ -118,40 +116,33 @@ impl FaceDetector {
         );
         prepare_input(frame, n, &mut self.input);
 
-        let value = TensorRef::from_array_view(([1usize, 3, SIDE, SIDE], self.input.as_slice()))
-            .context("passing the frame to the face detection model")?;
-        let outputs = self
-            .session
-            .run(ort::inputs![INPUT => value])
+        let (decoder, anchors) = (&mut self.decoder, &self.anchors);
+        let found = self
+            .model
+            .run(&self.input, |out| {
+                let (regressors, classificators) = (out[0], out[1]);
+                ensure!(
+                    regressors.len() == ANCHORS * REG && classificators.len() == ANCHORS,
+                    "it returned {} regressors and {} scores, not {} and {ANCHORS}",
+                    regressors.len(),
+                    classificators.len(),
+                    ANCHORS * REG
+                );
+                Ok(decoder
+                    .decode(regressors, classificators, anchors, n as f64)
+                    .len())
+            })
             .context("running the face detection model")?;
-        let (_, regressors) = outputs
-            .get(REGRESSORS)
-            .context("the face detection model has no regressors output")?
-            .try_extract_tensor::<f32>()
-            .context("reading the face detection model's regressors")?;
-        let (_, classificators) = outputs
-            .get(CLASSIFICATORS)
-            .context("the face detection model has no classificators output")?
-            .try_extract_tensor::<f32>()
-            .context("reading the face detection model's classificators")?;
-        ensure!(
-            regressors.len() == ANCHORS * REG && classificators.len() == ANCHORS,
-            "the face detection model returned {} regressors and {} scores, not {} and {ANCHORS}",
-            regressors.len(),
-            classificators.len(),
-            ANCHORS * REG
-        );
-        Ok(self
-            .decoder
-            .decode(regressors, classificators, &self.anchors, n as f64))
+        Ok(&self.decoder.detections[..found])
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "ort"))]
 impl FaceDetector {
-    /// The ONNX session, for the tests of the model's inputs and outputs.
-    pub(crate) fn session(&self) -> &Session {
-        &self.session
+    /// The ONNX Runtime session, for the tests of the model's inputs and
+    /// outputs.
+    pub(crate) fn session(&self) -> &ort::session::Session {
+        self.model.session()
     }
 }
 

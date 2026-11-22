@@ -1,19 +1,18 @@
 //! Head pose from the IR face frame, fully in Rust: crop the face out of the
 //! frame (turned by its eye line and sized from its landmarks, as
-//! `MediaPipe` does), run the `MediaPipe` face-landmark model via ONNX
-//! Runtime (`ort`) and fit the canonical face mesh to the landmarks (Kabsch
+//! `MediaPipe` does), run the `MediaPipe` face-landmark model (see
+//! [`crate::infer`]) and fit the canonical face mesh to the landmarks (Kabsch
 //! start, perspective `PnP`): [`Tracker::fit`] gives that [`FaceFit`] per
 //! frame. A face the crop has lost is looked for in the whole frame with
 //! `MediaPipe`'s `BlazeFace` detector. Validated against `MediaPipe` to
 //! within ~3 degrees. [`crate::head`] makes the head pose of the fits.
 
 use anyhow::{Context, Result, ensure};
-use ort::session::Session;
-use ort::value::TensorRef;
 use tracing::debug;
 
 use crate::canonical::CANONICAL_FACE;
 use crate::detect::{Detection, FaceDetector};
+use crate::infer::Model;
 
 // MediaPipe Face Mesh V2 converted to ONNX; Apache-2.0, see models/README.md.
 const MODEL: &[u8] = include_bytes!("../models/face_landmarks.onnx");
@@ -268,10 +267,10 @@ fn sample_crop(gray: &[u8], w: usize, h: usize, crop: &Crop, input: &mut [f32]) 
     }
 }
 
-/// The face-landmark ONNX session plus the buffers it reuses every frame: the
+/// The face-landmark model plus the buffers it reuses every frame: the
 /// 256x256x3 model input and the 468 landmarks it emits.
 pub(crate) struct FaceModel {
-    session: Session,
+    model: Model,
     /// Model input, `IN * IN * 3` normalised grey values (kept across frames).
     input: Vec<f32>,
     /// Landmarks of the last `landmarks` call (kept across frames).
@@ -279,17 +278,21 @@ pub(crate) struct FaceModel {
 }
 
 impl FaceModel {
-    /// Load the embedded face-landmark model into a new ONNX Runtime session.
+    /// Load the embedded face-landmark model.
     ///
     /// # Errors
-    /// Fails when ONNX Runtime cannot be initialised or rejects the model.
+    /// Fails when the inference back-end cannot start or rejects the model.
     pub fn new() -> Result<Self> {
-        let session = Session::builder()
-            .context("failed to start ONNX Runtime for the face landmark model")?
-            .commit_from_memory(MODEL)
-            .context("failed to load face landmark model")?;
+        let model = Model::load(
+            MODEL,
+            LANDMARK_INPUT,
+            [1, IN, IN, 3],
+            &[LANDMARK_POINTS, LANDMARK_PRESENCE],
+            false,
+        )
+        .context("failed to load face landmark model")?;
         Ok(Self {
-            session,
+            model,
             input: vec![0f32; IN * IN * 3],
             pts: Vec::with_capacity(NLM),
         })
@@ -302,7 +305,7 @@ impl FaceModel {
     /// overwrites.
     ///
     /// # Errors
-    /// Fails when the ONNX session rejects the input or the run fails, or
+    /// Fails when the model rejects the input or the run fails, or
     /// when an output the code reads is missing, not f32 or empty. Each
     /// error says it was the face landmark model's.
     pub(crate) fn landmarks(
@@ -314,29 +317,19 @@ impl FaceModel {
     ) -> Result<(&[[f32; 3]], f32)> {
         sample_crop(gray, w, h, crop, &mut self.input);
 
-        let value = TensorRef::from_array_view(([1usize, IN, IN, 3], self.input.as_slice()))
-            .context("passing the crop to the face landmark model")?;
-        let outputs = self
-            .session
-            .run(ort::inputs![LANDMARK_INPUT => value])
+        let pts = &mut self.pts;
+        let score = self
+            .model
+            .run(&self.input, |out| {
+                let (lm, score) = (out[0], out[1]);
+                let score = *score
+                    .first()
+                    .context("it returned no face presence score")?;
+                pts.clear();
+                pts.extend(lm.as_chunks::<3>().0.iter().take(NLM).copied());
+                Ok(score)
+            })
             .context("running the face landmark model")?;
-        let (_, lm) = outputs
-            .get(LANDMARK_POINTS)
-            .context("the face landmark model has no landmark output")?
-            .try_extract_tensor::<f32>()
-            .context("reading the face landmark model's landmarks")?;
-        let (_, score) = outputs
-            .get(LANDMARK_PRESENCE)
-            .context("the face landmark model has no face presence output")?
-            .try_extract_tensor::<f32>()
-            .context("reading the face landmark model's face presence")?;
-        let score = *score
-            .first()
-            .context("the face landmark model returned no face presence score")?;
-
-        self.pts.clear();
-        self.pts
-            .extend(lm.as_chunks::<3>().0.iter().take(NLM).copied());
         Ok((self.pts.as_slice(), score))
     }
 }
@@ -1624,6 +1617,7 @@ mod tests {
 
     /// Name, element type and shape (-1: any size) of each of a session's
     /// inputs or outputs.
+    #[cfg(feature = "ort")]
     fn signature(
         outlets: &[ort::value::Outlet],
     ) -> Vec<(&str, Option<ort::value::TensorElementType>, Vec<i64>)> {
@@ -1637,6 +1631,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "ort")]
     fn both_embedded_models_load_with_the_inputs_and_outputs_the_code_uses() {
         use crate::detect::{CLASSIFICATORS, INPUT, REGRESSORS};
         use ort::value::TensorElementType::Float32;
@@ -1644,11 +1639,11 @@ mod tests {
         // (Identity_2) is not read.
         let landmark = FaceModel::new().unwrap();
         assert_eq!(
-            signature(landmark.session.inputs()),
+            signature(landmark.model.session().inputs()),
             [(LANDMARK_INPUT, Some(Float32), vec![-1, 256, 256, 3])]
         );
         assert_eq!(
-            signature(landmark.session.outputs()),
+            signature(landmark.model.session().outputs()),
             [
                 (LANDMARK_POINTS, Some(Float32), vec![-1, 1, 1, 1434]),
                 (LANDMARK_PRESENCE, Some(Float32), vec![-1, 1, 1, 1]),
