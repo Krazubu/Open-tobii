@@ -26,6 +26,22 @@ pub const EP_IN: u8 = 0x83;
 /// Bulk OUT endpoint for command messages (what the init replay writes to).
 pub const EP_OUT: u8 = 0x05;
 
+/// Vendor control request: the SCP metadata (`key=value` lines: platform type,
+/// firmware version). `bmRequestType` 0x41 out / 0xC1 in, as the requests
+/// below.
+pub const REQ_SCP: u8 = 48;
+/// Vendor control request: open a TTP channel (`wValue` = channel); the first
+/// one also starts the stream on EP 0x83.
+pub const REQ_CHANNEL_OPEN: u8 = 65;
+/// Vendor control request: close a TTP channel (`wValue` = channel), the
+/// Windows-style stop.
+pub const REQ_CHANNEL_CLOSE: u8 = 66;
+/// Vendor control request: time sync, relayed to the tracker.
+pub const REQ_TIMESYNC: u8 = 69;
+/// Vendor control request read right after the SCP metadata at bring-up
+/// (`wValue` 1, 8 bytes back).
+pub const REQ_BRINGUP_STATE: u8 = 70;
+
 /// A Tobii tracker model this crate can recognise.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]

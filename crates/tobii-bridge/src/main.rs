@@ -21,11 +21,14 @@
 //! Firmware upgrade (mode 4) is deliberately not implemented: those clients
 //! are accepted and ignored. SCP (mode 6) is answered "not supported".
 
-use rusb::{DeviceHandle, GlobalContext};
+use rusb::{Context, DeviceHandle};
 use std::io::{ErrorKind, Read, Write};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
+use tobii_usb::models::{
+    EP_IN, EP_OUT, REQ_CHANNEL_CLOSE, REQ_CHANNEL_OPEN, REQ_SCP, REQ_TIMESYNC, VID,
+};
 
 #[cfg(unix)]
 #[path = "transport_unix.rs"]
@@ -41,29 +44,13 @@ mod prp;
 #[allow(dead_code)]
 mod ttp;
 
-const VID: u16 = 0x2104;
-/// Eye Tracker 5.
-const PID_ET5: u16 = 0x0313;
-/// Pro Spark (platform IS5LPROENTRY). Same transport family; interface 0 has an
-/// extra bulk OUT 0x04 alongside 0x05/0x83, not used by this bridge.
-const PID_SPARK: u16 = 0x031C;
-/// Known Tobii trackers, tried in order by [`open_device`].
-const KNOWN_PIDS: [u16; 2] = [PID_ET5, PID_SPARK];
-const IFACE: u8 = 0;
-const EP_OUT: u8 = 0x05;
-const EP_IN: u8 = 0x83;
 const CHANNELS: usize = 32;
 /// Largest data piece per bulk OUT write, as the Windows captures and the
 /// Spark runtime use (`f7 0f 00 00` in tobii-linux's init_packets).
 const OUT_PIECE_MAX: usize = 0xFF7;
 const CTRL_TIMEOUT: Duration = Duration::from_millis(5000);
 
-const REQ_SCP: u8 = 48;
-const REQ_CHANNEL_OPEN: u8 = 65;
-const REQ_CHANNEL_CLOSE: u8 = 66;
-const REQ_TIMESYNC: u8 = 69;
-
-type Handle = Arc<DeviceHandle<GlobalContext>>;
+type Handle = Arc<DeviceHandle<Context>>;
 type Writer = Box<dyn Write + Send>;
 type Slots = Arc<Mutex<Vec<Option<Writer>>>>;
 
@@ -450,21 +437,17 @@ fn dump_keyed(label: &str, payload: &[u8]) {
     log!("{label} hex[..160]: {hex}");
 }
 
-fn open_device() -> rusb::Result<DeviceHandle<GlobalContext>> {
-    for pid in KNOWN_PIDS {
-        let Some(h) = rusb::open_device_with_vid_pid(VID, pid) else {
-            continue;
-        };
-        let _ = h.set_auto_detach_kernel_driver(true);
-        let _ = h.set_active_configuration(1);
-        h.claim_interface(IFACE)?;
-        log!("opened {VID:04x}:{pid:04x}");
-        return Ok(h);
+/// Open and claim the first supported tracker (the Eye Tracker 5 or the Pro
+/// Spark: `tobii-usb`'s model table), the way the daemon does.
+fn open_device() -> anyhow::Result<DeviceHandle<Context>> {
+    let handle = tobii_usb::device::open_tobii(&Context::new()?)?;
+    if let Ok(desc) = handle.device().device_descriptor() {
+        log!("opened {:04x}:{:04x}", desc.vendor_id(), desc.product_id());
     }
-    Err(rusb::Error::NoDevice)
+    Ok(handle)
 }
 
-fn serial_number(h: &DeviceHandle<GlobalContext>) -> Option<String> {
+fn serial_number(h: &DeviceHandle<Context>) -> Option<String> {
     let desc = h.device().device_descriptor().ok()?;
     h.read_serial_number_string_ascii(&desc).ok()
 }
@@ -515,7 +498,7 @@ fn start_tetserver(bridge: &Arc<Bridge>, port: u16, serial: &str, scp: &[(String
 /// Query the device's SCP metadata (request 48), as the services do at open,
 /// log it and return its `key=value` pairs: they name the platform and
 /// firmware.
-fn scp_metadata(h: &DeviceHandle<GlobalContext>) -> Vec<(String, String)> {
+fn scp_metadata(h: &DeviceHandle<Context>) -> Vec<(String, String)> {
     let mut pairs = Vec::new();
     let req: [u8; 24] = [
         1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,

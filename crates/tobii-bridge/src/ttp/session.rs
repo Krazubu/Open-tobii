@@ -10,7 +10,7 @@
 //! by [`super::protocol::BulkReassembler`].
 
 use super::protocol::{self, BulkReassembler, MARKER_NOTIFICATION, MARKER_RESPONSE, MARKER_STREAM};
-use rusb::{DeviceHandle, GlobalContext, UsbContext};
+use rusb::{Context, DeviceHandle, UsbContext};
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -18,15 +18,14 @@ use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
+use tobii_usb::models::{EP_IN, EP_OUT};
 
-const EP_OUT: u8 = 0x05;
-const EP_IN: u8 = 0x83;
 const CTRL_TIMEOUT: Duration = Duration::from_millis(5000);
 // Generous: USB in a VM is slow (device bring-up takes tens of seconds), and a
 // command whose response lags must not be given up on.
 const CMD_TIMEOUT: Duration = Duration::from_millis(12000);
 
-type Usb = Arc<DeviceHandle<GlobalContext>>;
+type Usb = Arc<DeviceHandle<Context>>;
 
 /// A message the device sent that is not a command response: a stream (0x53)
 /// or a notification (0x4e). The bytes include the 8-byte prefix, so
@@ -54,7 +53,7 @@ impl Session {
     /// and replay the init sequence from `init_packets` (already in bulk-OUT
     /// framing).
     pub fn open(usb: Usb, init_packets: &[Vec<u8>]) -> rusb::Result<Self> {
-        vendor_control_init(&usb)?;
+        tobii_usb::device::vendor_control_init_with(&usb, CTRL_TIMEOUT)?;
 
         let (stream_tx, stream_rx) = sync_channel(1024);
         let shared = Arc::new(Shared {
@@ -170,7 +169,7 @@ impl Session {
             // A packet is `[channel u32][len u32][ttp message]`; the message
             // starts at offset 8, its marker is a BE u32 there, and the command
             // id is the BE u32 at message offset 12 (marker, seq, status, id).
-            if let Some(seq) = command_seq_of(pkt) {
+            if let Some(seq) = tobii_usb::device::command_seq(pkt) {
                 let cmd_id = pkt
                     .get(20..24)
                     .map(|b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
@@ -184,7 +183,7 @@ impl Session {
             self.write_raw(pkt)?;
             let complete = packets
                 .get(i + 1)
-                .is_none_or(|n| command_seq_of(n).is_some());
+                .is_none_or(|n| tobii_usb::device::command_seq(n).is_some());
             if complete && let Some((seq, cmd_id, t0, rx)) = awaiting.take() {
                 match rx.recv_timeout(CMD_TIMEOUT) {
                     Ok(bytes) => {
@@ -211,34 +210,6 @@ impl Session {
         }
         Ok(())
     }
-}
-
-/// The sequence number a bulk-OUT packet's command expects echoed, or `None`
-/// if it is not a `0x51` command. The TTP message starts at offset 8 (after
-/// the `[channel][len]` framing), marker and seq are BE u32 there.
-fn command_seq_of(pkt: &[u8]) -> Option<u32> {
-    let msg = pkt.get(8..)?;
-    let marker = u32::from_be_bytes(msg.get(0..4)?.try_into().ok()?);
-    if marker != protocol::MARKER_COMMAND {
-        return None;
-    }
-    Some(u32::from_be_bytes(msg.get(4..8)?.try_into().ok()?))
-}
-
-/// Control-transfer bring-up, mirroring tobii-linux `vendor_control_init`:
-/// request 48 (SCP init) out/in, request 70 in, then request 65 wValue 0 to
-/// open channel 0.
-fn vendor_control_init(usb: &DeviceHandle<GlobalContext>) -> rusb::Result<()> {
-    let init: [u8; 24] = [
-        1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    ];
-    usb.write_control(0x41, 48, 0, 0, &init, CTRL_TIMEOUT)?;
-    let mut buf = [0u8; 512];
-    usb.read_control(0xC1, 48, 0, 0, &mut buf, CTRL_TIMEOUT)?;
-    let mut buf8 = [0u8; 8];
-    usb.read_control(0xC1, 70, 1, 0, &mut buf8, CTRL_TIMEOUT)?;
-    usb.write_control(0x41, 65, 0, 0, &[], CTRL_TIMEOUT)?;
-    Ok(())
 }
 
 /// Number of EP 0x83 read transfers kept in flight, and each one's size. The

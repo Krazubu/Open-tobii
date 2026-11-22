@@ -146,10 +146,7 @@ mod tests {
     const TS_UUID: &str = "025cbdd0-a05f-4e9d-bdf8-122c78c2452c";
 
     fn hex(s: &str) -> Vec<u8> {
-        (0..s.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
-            .collect()
+        tobii_proto::protocol::hex_to_bytes(s).expect("a hex constant")
     }
 
     #[test]

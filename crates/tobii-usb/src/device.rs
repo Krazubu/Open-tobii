@@ -22,6 +22,7 @@ use crate::engine::{
     CommandError, CommandResponse, CustomSample, DeviceCommand, DisplayGeneration, GazeSample,
     ImageSample, OpenNumber, PresenceSample, QueuedCommand, Sample, Shared, StreamChange,
 };
+use crate::models::{REQ_BRINGUP_STATE, REQ_CHANNEL_CLOSE, REQ_CHANNEL_OPEN, REQ_SCP};
 use crate::pose::{self, Mailbox};
 use crate::time_map::{Stream, TimeMap};
 use std::sync::mpsc::Receiver;
@@ -313,29 +314,42 @@ pub unsafe fn open_tobii_with_fd(
 ///
 /// Propagates a failing control transfer.
 pub fn vendor_control_init(h: &mut rusb::DeviceHandle<UsbContext>) -> Result<()> {
-    let timeout = Duration::from_millis(2000);
+    Ok(vendor_control_init_with(h, Duration::from_millis(2000))?)
+}
 
+/// [`vendor_control_init`] with the caller's own timeout for each control
+/// transfer, on a shared handle. A tracker brought up through a virtual
+/// machine's USB can need far longer than the daemon's default, which is why
+/// the bridge passes its own.
+///
+/// # Errors
+///
+/// Propagates a failing control transfer.
+pub fn vendor_control_init_with(
+    h: &rusb::DeviceHandle<UsbContext>,
+    timeout: Duration,
+) -> rusb::Result<()> {
     let init_data: [u8; 24] = [
         0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00,
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     ];
 
-    let n = h.write_control(0x41, 48, 0, 0, &init_data, timeout)?;
+    let n = h.write_control(0x41, REQ_SCP, 0, 0, &init_data, timeout)?;
     debug!(written = n, "control OUT 48");
 
     let mut buf = [0u8; 512];
-    let n = h.read_control(0xC1, 48, 0, 0, &mut buf, timeout)?;
+    let n = h.read_control(0xC1, REQ_SCP, 0, 0, &mut buf, timeout)?;
     debug!(read = n, "control IN 48");
 
     let mut buf8 = [0u8; 8];
-    let n = h.read_control(0xC1, 70, 1, 0, &mut buf8, timeout)?;
+    let n = h.read_control(0xC1, REQ_BRINGUP_STATE, 1, 0, &mut buf8, timeout)?;
     debug!(
         read = n,
         data = %format_args!("{:02x?}", &buf8[..n]),
         "control IN 70"
     );
 
-    let n = h.write_control(0x41, 65, 0, 0, &[], timeout)?;
+    let n = h.write_control(0x41, REQ_CHANNEL_OPEN, 0, 0, &[], timeout)?;
     debug!(written = n, "control OUT 65");
 
     Ok(())
@@ -351,7 +365,7 @@ pub fn vendor_control_deinit(h: &mut rusb::DeviceHandle<UsbContext>) {
     let timeout = Duration::from_millis(500);
     // Quiet on success: this also runs on each cold-start prime re-open, where a
     // "stop stream written" line would just be confusing noise.
-    if let Err(e) = h.write_control(0x41, 66, 0, 0, &[], timeout) {
+    if let Err(e) = h.write_control(0x41, REQ_CHANNEL_CLOSE, 0, 0, &[], timeout) {
         warn!(error = %e, "tobii deinit: control OUT 66 failed");
     }
 }
