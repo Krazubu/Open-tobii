@@ -1531,10 +1531,10 @@ mod tests {
         assert_eq!(hits, 0);
     }
 
-    /// A request (`tobii_get_track_box`) to a daemon that stopped reading
-    /// fails, writing no track box, and loses the connection: the next
-    /// process call reports it, after the sample that came first, although
-    /// the reader has seen nothing.
+    /// A request (`tobii_get_track_box`) on a connection that can no longer
+    /// be written fails, writing no track box, and loses the connection: the
+    /// next process call reports it, after the sample that came first,
+    /// although the reader has seen nothing.
     #[test]
     fn a_failed_request_loses_the_connection() {
         let mut hits = 0u32;

@@ -23,6 +23,10 @@ tobii-calib.workspace = true
 tobii-ipc.workspace = true
 tracing.workspace = true
 
+# FIONREAD, to stop a reader without losing what is buffered (`stop_reader`).
+[target.'cfg(not(any(target_os = "linux", target_os = "android")))'.dependencies]
+libc.workspace = true
+
 [dev-dependencies]
 rand.workspace = true
 tobii-calib = { workspace = true, features = ["testing"] }

@@ -2590,6 +2590,7 @@ name = "tobii-ffi"
 version = "0.6.0"
 dependencies = [
  "base64",
+ "libc",
  "rand 0.8.8",
  "rsa",
  "sha2",
