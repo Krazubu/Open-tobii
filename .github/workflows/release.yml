@@ -5,9 +5,11 @@
 #   * linux   — the packages (`make package`, in packaging/Containerfile)
 #   * macos   — tobiid + tobii-calibrate for Apple Silicon and Intel 64-bit
 #   * android — the proof-of-concept APK (arm64-v8a + armeabi-v7a)
+#   * bridge  — ttpbridge + ttpclient (crates/tobii-bridge) for macOS and
+#               Windows, with libusb built from source (`vendored`)
 #
-# Windows is not built here: this project has no Windows support (the Windows
-# binaries are tobii-et5-bridge's). macOS 32-bit (i686-apple-darwin) is a tier-3
+# The bridge is the only thing built for Windows: the daemon has no Windows
+# support. macOS 32-bit (i686-apple-darwin) is a tier-3
 # target needing a nightly toolchain and the 10.14 SDK, so it is built by hand
 # from the macos-i386 branch, not here.
 #
@@ -161,8 +163,71 @@ jobs:
           path: open-tobii-android-*.apk
           if-no-files-found: error
 
+  bridge:
+    name: bridge ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: macos-arm64,   os: macos-14,       target: aarch64-apple-darwin }
+          - { name: macos-x64,     os: macos-14,       target: x86_64-apple-darwin }
+          - { name: windows-x64,   os: windows-latest, target: x86_64-pc-windows-msvc }
+          - { name: windows-x86,   os: windows-latest, target: i686-pc-windows-msvc }
+          - { name: windows-arm64, os: windows-11-arm, target: aarch64-pc-windows-msvc }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Add the target
+        run: rustup target add ${{ matrix.target }}
+
+      # libusb is built from source, so each target only needs its Rust
+      # toolchain and a C compiler, both present on the runners.
+      - name: Build ttpbridge and ttpclient
+        run: cargo build --release --locked --target ${{ matrix.target }} -p ttpbridge --features vendored --bins
+
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="ttpbridge-${GITHUB_REF_NAME}-${{ matrix.name }}"
+          mkdir "$out"
+          cp "target/${{ matrix.target }}/release/ttpbridge" "$out/"
+          cp "target/${{ matrix.target }}/release/ttpclient" "$out/"
+          cp crates/tobii-bridge/README.md crates/tobii-bridge/LICENSE "$out/"
+          cp -R crates/tobii-bridge/scripts crates/tobii-bridge/packaging "$out/"
+          tar czf "$out.tar.gz" "$out"
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="ttpbridge-${GITHUB_REF_NAME}-${{ matrix.name }}"
+          mkdir "$out"
+          cp "target/${{ matrix.target }}/release/ttpbridge.exe" "$out/"
+          cp "target/${{ matrix.target }}/release/ttpclient.exe" "$out/"
+          cp crates/tobii-bridge/README.md crates/tobii-bridge/LICENSE "$out/"
+          cp -R crates/tobii-bridge/scripts "$out/"
+          7z a "$out.zip" "$out"
+
+      - name: Keep the archive
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ttpbridge-${{ matrix.name }}
+          path: |
+            ttpbridge-*-${{ matrix.name }}.tar.gz
+            ttpbridge-*-${{ matrix.name }}.zip
+          if-no-files-found: error
+
   publish:
-    needs: [linux, macos, android]
+    needs: [linux, macos, android, bridge]
     # Publish whatever built: a target that fails does not sink the release;
     # its binaries can be added later with `gh release upload`.
     if: always() && github.ref_type == 'tag'

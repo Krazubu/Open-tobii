@@ -243,6 +243,11 @@ rather than 20 MB).
 | `tobii-calibrate` | the calibration window | `winit`, `softbuffer` |
 | `tobii-tools` | `tobii5-init-replay`: log analysis, UVC camera, diagnostics | all of the above |
 
+The fork adds `tobii-android` (the Android proof of concept) and
+[`tobii-bridge`](crates/tobii-bridge) (`ttpbridge`: serves the tracker to Tobii
+Pro Eye Tracker Manager on macOS and Windows; formerly the separate
+`tobii-et5-bridge` repository).
+
 `make check` runs fmt, clippy with `-D warnings`, the tests and rustdoc.
 `make verify-abi` asserts `libtobii.so` exports exactly the 199 symbols in
 `crates/tobii-ffi/abi-symbols.txt`, then compiles and runs
