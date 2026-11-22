@@ -746,6 +746,7 @@ impl HeadFlag {
     }
 
     /// Whether the flag is set, and was raised since it was `before`.
+    #[cfg(feature = "head-pose")]
     #[must_use]
     pub(crate) fn is_raised_since(self, before: Self) -> bool {
         self.on && self.raised != before.raised
@@ -781,7 +782,8 @@ impl Shared {
         self.image_wanted.store(wanted.image, Ordering::Relaxed);
     }
 
-    /// The head flag as it is now.
+    /// The head flag as it is now (read by the pose worker).
+    #[cfg(feature = "head-pose")]
     pub(crate) fn head(&self) -> HeadFlag {
         *self.head.lock().unwrap_or_else(PoisonError::into_inner)
     }

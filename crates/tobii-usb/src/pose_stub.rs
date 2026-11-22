@@ -33,6 +33,16 @@ impl Mailbox {
     pub(crate) fn wake(&self) {
         self.wake.notify_all();
     }
+
+    /// The image waiting for the worker, left where it is (as in
+    /// [`pose`](super::pose), for the tests of `device.rs`).
+    #[cfg(test)]
+    pub(crate) fn waiting(&self) -> Option<ImageSample> {
+        self.slot
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
 }
 
 /// Logs that this build has no head-pose worker and returns at once, the
