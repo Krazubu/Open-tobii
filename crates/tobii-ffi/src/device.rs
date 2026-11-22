@@ -433,6 +433,45 @@ impl Doorbell {
     }
 }
 
+/// Shut both halves of `stream` down, so the daemon reads EOF and a read
+/// blocked on it returns. The write half goes first, on its own: once the
+/// daemon has shut its write half, macOS refuses `SHUT_RDWR` with `ENOTCONN`
+/// and shuts neither, so the daemon would read on. A shutdown error only
+/// means that half is closed already.
+fn hang_up(stream: &UnixStream) {
+    let _ = stream.shutdown(Shutdown::Write);
+    let _ = stream.shutdown(Shutdown::Read);
+}
+
+/// Stop the reader of `stream`, letting it first read what the daemon has
+/// sent: on Linux, a read after `SHUT_RD` still returns what is buffered,
+/// and EOF only after it, so [`hang_up`] does.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn stop_reader(stream: &UnixStream) {
+    hang_up(stream);
+}
+
+/// Stop the reader of `stream`, letting it first read what the daemon has
+/// sent. Elsewhere (macOS, the BSDs) `SHUT_RD` throws away what is buffered,
+/// so it is used only to wake a reader blocked on an empty buffer: with the
+/// socket non-blocking, a read that would block ends the reader instead, so
+/// while anything is buffered the reader reads it out and then stops, with
+/// no `SHUT_RD`. A reader blocked in its read means the buffer was empty
+/// when it blocked, and bytes since have woken it.
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+fn stop_reader(stream: &UnixStream) {
+    use std::os::fd::AsRawFd;
+
+    let _ = stream.shutdown(Shutdown::Write);
+    let mut buffered: libc::c_int = 0;
+    // SAFETY: `FIONREAD` writes one `c_int`, to a live local.
+    let peeked = stream.set_nonblocking(true).is_ok()
+        && unsafe { libc::ioctl(stream.as_raw_fd(), libc::FIONREAD, &raw mut buffered) } == 0;
+    if !peeked || buffered == 0 {
+        let _ = stream.shutdown(Shutdown::Read);
+    }
+}
+
 /// One daemon connection and the thread reading it, which sorts what the
 /// daemon sends into two channels, each in the order it came: the answers,
 /// read only by a request or subscription change waiting for its own, under
@@ -487,10 +526,9 @@ impl Link {
     /// in the channels, each followed by a disconnect, so the next `process`
     /// or `wait` finds the loss whether or not the reader had seen one.
     fn close(&mut self) {
-        // Shutting down the socket makes the reader's blocking read return, so
-        // the join below cannot hang; a shutdown error only means it is already
-        // closed.
-        let _ = self.stream.shutdown(Shutdown::Both);
+        // Stopping the reader makes its blocking read return, so the join
+        // below cannot hang.
+        stop_reader(&self.stream);
         if let Some(h) = self.reader.take()
             && h.join().is_err()
         {
@@ -646,9 +684,8 @@ impl ReaderEnd {
 impl Drop for ReaderEnd {
     fn drop(&mut self) {
         // The connection closes however its loss is found, not only once a
-        // `process` or `wait` notices it; a shutdown error only means it is
-        // closed already.
-        let _ = self.stream.shutdown(Shutdown::Both);
+        // `process` or `wait` notices it.
+        hang_up(&self.stream);
         // Hang up before ringing: a wait woken by a ring made with the
         // channels still up would find the samples channel empty rather
         // than disconnected, and sleep again with nothing left to ring.
@@ -4341,9 +4378,11 @@ pub(crate) mod tests {
     }
 
     /// A device subscribed to gaze origin, `ud` counting the deliveries,
-    /// whose daemon acked, sent one sample and stopped reading. The daemon's
-    /// end, returned, stays open, so the reader sees nothing, but a write
-    /// fails.
+    /// whose daemon acked and sent one sample, and whose connection can no
+    /// longer be written. The daemon's end, returned, stays open, so the
+    /// reader sees nothing, but a write fails. The write half is shut on the
+    /// device's own end: a daemon that shuts its read half fails the
+    /// device's writes on Linux alone (macOS takes them and drops them).
     pub(crate) fn deaf_daemon_device(ud: *mut c_void) -> (Device, UnixStream) {
         let (connect, daemons) = scripted_daemon(vec![ack_then_gaze_origin(1)]);
         let d = Device::new(connect, 1, 1).expect("device");
@@ -4353,13 +4392,18 @@ pub(crate) mod tests {
             TOBII_ERROR_NO_ERROR
         );
         assert_eq!(subscription(&mut daemon), Some(STREAM_GAZE_ORIGIN));
-        daemon.shutdown(Shutdown::Read).expect("shutdown");
+        d.command
+            .lock()
+            .link
+            .stream
+            .shutdown(Shutdown::Write)
+            .expect("shutdown");
         (d, daemon)
     }
 
-    /// A write fails once the daemon stops reading, although its end is
-    /// still open and the reader has seen nothing: the loss is reported all
-    /// the same, after the sample that came first.
+    /// A write fails although the daemon's end is still open and the reader
+    /// has seen nothing: the loss is reported all the same, after the sample
+    /// that came first.
     #[test]
     fn a_failed_write_loses_the_connection_while_the_reader_still_runs() {
         let mut hits = 0u32;
