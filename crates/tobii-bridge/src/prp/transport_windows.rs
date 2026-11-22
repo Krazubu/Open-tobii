@@ -14,19 +14,19 @@ use super::wire::{self, Message};
 use std::io;
 use std::ptr::{null, null_mut};
 use windows_sys::Win32::Foundation::{
-    CloseHandle, GetLastError, ERROR_MORE_DATA, ERROR_PIPE_BUSY, ERROR_PIPE_CONNECTED,
-    GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE,
+    CloseHandle, ERROR_MORE_DATA, ERROR_PIPE_BUSY, ERROR_PIPE_CONNECTED, GENERIC_WRITE,
+    GetLastError, HANDLE, INVALID_HANDLE_VALUE,
 };
 use windows_sys::Win32::Security::Authorization::{
     ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
 };
 use windows_sys::Win32::Security::{PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES};
 use windows_sys::Win32::Storage::FileSystem::{
-    CreateFileW, ReadFile, WriteFile, OPEN_EXISTING, PIPE_ACCESS_INBOUND,
+    CreateFileW, OPEN_EXISTING, PIPE_ACCESS_INBOUND, ReadFile, WriteFile,
 };
 use windows_sys::Win32::System::Pipes::{
-    ConnectNamedPipe, CreateNamedPipeW, WaitNamedPipeW, PIPE_READMODE_MESSAGE, PIPE_TYPE_MESSAGE,
-    PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
+    ConnectNamedPipe, CreateNamedPipeW, PIPE_READMODE_MESSAGE, PIPE_TYPE_MESSAGE,
+    PIPE_UNLIMITED_INSTANCES, PIPE_WAIT, WaitNamedPipeW,
 };
 
 const PIPE_BUFFER: u32 = 0x80000;
@@ -48,7 +48,12 @@ fn security_attrs() -> (SECURITY_ATTRIBUTES, PSECURITY_DESCRIPTOR) {
     let sddl = wide("D:(A;;GA;;;WD)(A;;GA;;;SY)(A;;GA;;;BA)");
     let mut sd: PSECURITY_DESCRIPTOR = null_mut();
     unsafe {
-        ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl.as_ptr(), SDDL_REVISION_1, &mut sd, null_mut());
+        ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            sddl.as_ptr(),
+            SDDL_REVISION_1,
+            &mut sd,
+            null_mut(),
+        );
     }
     let attrs = SECURITY_ATTRIBUTES {
         nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
@@ -90,7 +95,17 @@ fn connect(p: &Pipe) -> io::Result<()> {
 fn open_for_write(name: &str) -> io::Result<Pipe> {
     let path = wide(&format!(r"\\.\pipe\{name}"));
     for _ in 0..5 {
-        let h = unsafe { CreateFileW(path.as_ptr(), GENERIC_WRITE, 0, null(), OPEN_EXISTING, 0, null_mut()) };
+        let h = unsafe {
+            CreateFileW(
+                path.as_ptr(),
+                GENERIC_WRITE,
+                0,
+                null(),
+                OPEN_EXISTING,
+                0,
+                null_mut(),
+            )
+        };
         if h != INVALID_HANDLE_VALUE {
             return Ok(Pipe(h));
         }
@@ -181,12 +196,19 @@ fn accept_one(name: &str, expect: ChannelKind, ack: &[u8]) -> io::Result<Channel
     connect(&server)?;
     let hello = read_message(&server)?;
     if std::env::var("PRP_DEBUG").is_ok() {
-        eprintln!("accept {name}: hello {} bytes: {:02x?}", hello.len(), &hello[..hello.len().min(16)]);
+        eprintln!(
+            "accept {name}: hello {} bytes: {:02x?}",
+            hello.len(),
+            &hello[..hello.len().min(16)]
+        );
     }
     let (kind, client_name) = server::parse_client_hello(&hello)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "bad PRP hello"))?;
     if kind != expect {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "unexpected PRP channel kind"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "unexpected PRP channel kind",
+        ));
     }
     let debug = std::env::var("PRP_DEBUG").is_ok();
     let client = match open_for_write(&client_name) {
@@ -212,7 +234,11 @@ fn accept_one(name: &str, expect: ChannelKind, ack: &[u8]) -> io::Result<Channel
     if debug {
         eprintln!("accept {name}: pid {pid:#x} — handshake complete");
     }
-    Ok(Channel { server, client, inbox: Vec::new() })
+    Ok(Channel {
+        server,
+        client,
+        inbox: Vec::new(),
+    })
 }
 
 /// The PRP listener. The three channels are independent connections: PETM
@@ -234,7 +260,8 @@ impl Listener {
         // does not enumerate) so a logging relay can take the discoverable name
         // and forward to us. The sub/ts pipe names are unchanged: PETM learns
         // them from the command ack and reaches them directly.
-        let main_name = std::env::var("PRP_MAIN_PIPE").unwrap_or_else(|_| format!("TOBIIPRP-{serial}"));
+        let main_name =
+            std::env::var("PRP_MAIN_PIPE").unwrap_or_else(|_| format!("TOBIIPRP-{serial}"));
         drop(inbound_instance(&main_name)?); // fail now if the name is taken
         Ok(Listener {
             main_name,
@@ -251,16 +278,28 @@ impl Listener {
     /// subscription and time sync endpoints). Fast: it never waits for the
     /// other two channels, so discovery probes are served at once.
     pub fn accept_command(&self) -> io::Result<Channel> {
-        accept_one(&self.main_name, ChannelKind::Command, &server::command_ack(&self.sub_name, &self.ts_name))
+        accept_one(
+            &self.main_name,
+            ChannelKind::Command,
+            &server::command_ack(&self.sub_name, &self.ts_name),
+        )
     }
 
     /// Accept one subscription connection; the stream forwarder writes to it.
     pub fn accept_sub(&self) -> io::Result<Channel> {
-        accept_one(&self.sub_name, ChannelKind::Subscription, &server::subscription_ack())
+        accept_one(
+            &self.sub_name,
+            ChannelKind::Subscription,
+            &server::subscription_ack(),
+        )
     }
 
     /// Accept one time sync connection.
     pub fn accept_timesync(&self) -> io::Result<Channel> {
-        accept_one(&self.ts_name, ChannelKind::Timesync, &server::timesync_ack())
+        accept_one(
+            &self.ts_name,
+            ChannelKind::Timesync,
+            &server::timesync_ack(),
+        )
     }
 }

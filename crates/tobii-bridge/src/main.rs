@@ -76,6 +76,11 @@ macro_rules! log {
     }};
 }
 
+// After `log!`, which it uses.
+#[cfg(target_os = "macos")]
+mod bonjour;
+mod tetserver;
+
 /// Optional traffic capture: when `TTPBRIDGE_CAPTURE=<path>` is set, every
 /// per-channel client write to the device (`TX`) and every demultiplexed EP
 /// 0x83 payload from the device (`RX`) is appended as a tab-separated line
@@ -86,23 +91,26 @@ macro_rules! log {
 static CAPTURE: std::sync::OnceLock<Option<Mutex<std::fs::File>>> = std::sync::OnceLock::new();
 
 fn capture_init() {
-    let cap = std::env::var("TTPBRIDGE_CAPTURE").ok().and_then(|p| {
-        match std::fs::File::create(&p) {
-            Ok(f) => {
-                log!("capturing channel traffic to {p}");
-                Some(Mutex::new(f))
-            }
-            Err(e) => {
-                log!("cannot open capture file {p}: {e}");
-                None
-            }
-        }
-    });
+    let cap =
+        std::env::var("TTPBRIDGE_CAPTURE")
+            .ok()
+            .and_then(|p| match std::fs::File::create(&p) {
+                Ok(f) => {
+                    log!("capturing channel traffic to {p}");
+                    Some(Mutex::new(f))
+                }
+                Err(e) => {
+                    log!("cannot open capture file {p}: {e}");
+                    None
+                }
+            });
     let _ = CAPTURE.set(cap);
 }
 
 fn capture(dir: &str, tag: &str, data: &[u8]) {
-    let Some(Some(file)) = CAPTURE.get() else { return };
+    let Some(Some(file)) = CAPTURE.get() else {
+        return;
+    };
     let t = START.get_or_init(Instant::now).elapsed().as_millis();
     let mut hex = String::with_capacity(data.len() * 2);
     for b in data {
@@ -141,13 +149,25 @@ fn main() {
     capture_init();
     let mut dir = None;
     let mut name_override = None;
+    let mut tetserver_port = Some(tetserver::DEFAULT_PORT);
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
             "--dir" => dir = Some(args.next().expect("--dir needs a path")),
             "--name" => name_override = Some(args.next().expect("--name needs a value")),
+            "--no-tetserver" => tetserver_port = None,
+            "--tetserver-port" => {
+                tetserver_port = Some(
+                    args.next()
+                        .and_then(|p| p.parse().ok())
+                        .expect("--tetserver-port needs a port number"),
+                );
+            }
             _ => {
-                eprintln!("usage: ttpbridge [--dir <socket dir, macOS only>] [--name <serial>]");
+                eprintln!(
+                    "usage: ttpbridge [--dir <socket dir, macOS only>] [--name <serial>] \
+                     [--no-tetserver | --tetserver-port <port>]"
+                );
                 std::process::exit(2);
             }
         }
@@ -160,16 +180,20 @@ fn main() {
             std::process::exit(1);
         }
     };
-    let serial = name_override.unwrap_or_else(|| serial_number(&usb).unwrap_or_else(|| "UNKNOWN".into()));
+    let serial =
+        name_override.unwrap_or_else(|| serial_number(&usb).unwrap_or_else(|| "UNKNOWN".into()));
     log!("device serial {serial}");
-    scp_metadata(&usb);
+    let scp = scp_metadata(&usb);
 
     let mut listener = transport::Listener::bind(&format!("TOBII-{serial}"), dir.as_deref())
         .unwrap_or_else(|e| {
             log!("cannot create the TOBII-{serial} endpoint: {e}");
             std::process::exit(1);
         });
-    log!("listening on {} (clients see tobii-ttp://{serial})", listener.describe());
+    log!(
+        "listening on {} (clients see tobii-ttp://{serial})",
+        listener.describe()
+    );
 
     let bridge = Arc::new(Bridge {
         usb: usb.clone(),
@@ -184,10 +208,18 @@ fn main() {
         thread::spawn(move || usb_read_loop(&usb, &slots));
     }
 
-    for n in 0.. {
+    if let Some(port) = tetserver_port {
+        start_tetserver(&bridge, port, &serial, &scp);
+    }
+
+    // A number per client, for the log only.
+    let mut clients: usize = 0;
+    loop {
         match listener.accept() {
             Ok(pending) => {
                 let b = bridge.clone();
+                let n = clients;
+                clients = clients.wrapping_add(1);
                 thread::spawn(move || match pending.handshake() {
                     Ok(conn) => handle_client(&b, n, conn),
                     Err(e) => log!("client {n}: handshake failed ({e})"),
@@ -225,7 +257,11 @@ fn prp_server() {
         }
     };
     let props = Arc::new(prp::run::Properties::read_from(&session));
-    log!("device ready: '{}', {} Hz", props.device_name, props.output_frequency);
+    log!(
+        "device ready: '{}', {} Hz",
+        props.device_name,
+        props.output_frequency
+    );
     // Start the image stream first, as the Windows Stream Engine, tobii-linux
     // and `ttp-probe` do: on the ET5 it drives the camera and its IR
     // illuminators, without which the device tracks no eye — so a calibration
@@ -247,11 +283,16 @@ fn prp_server() {
         Err(e) => {
             log!("cannot serve TOBIIPRP-{serial}: {e}");
             #[cfg(unix)]
-            log!("(the PRP sockets live in /var/run — run the bridge with sudo, or set PRP_SOCKET_DIR)");
+            log!(
+                "(the PRP sockets live in /var/run — run the bridge with sudo, or set PRP_SOCKET_DIR)"
+            );
             std::process::exit(1);
         }
     };
-    log!("listening on {} (clients see tobii-prp://{serial})", listener.describe());
+    log!(
+        "listening on {} (clients see tobii-prp://{serial})",
+        listener.describe()
+    );
 
     if let Err(e) = prp::run::run_server(session, listener, props) {
         log!("prp server stopped: {e}");
@@ -299,7 +340,14 @@ fn ttp_probe() {
                     .filter(|s| s.len() >= 3 && s.iter().all(|&c| (0x20..0x7f).contains(&c)))
                     .map(|s| String::from_utf8_lossy(s).into_owned())
                     .collect();
-                log!("{name}: error {err:#x}, {plen} B payload{}", if strings.is_empty() { String::new() } else { format!(", strings {strings:?}") });
+                log!(
+                    "{name}: error {err:#x}, {plen} B payload{}",
+                    if strings.is_empty() {
+                        String::new()
+                    } else {
+                        format!(", strings {strings:?}")
+                    }
+                );
             }
             Err(e) => log!("{name}: {e}"),
         }
@@ -322,38 +370,43 @@ fn ttp_probe() {
     let (mut gaze_dumped, mut pres_dumped) = (0u32, 0u32);
     log!(">>> WATCH THE TRACKER NOW: do the red LEDs light up? (20s) <<<");
     while start.elapsed() < Duration::from_secs(20) {
-        match rx.recv_timeout(Duration::from_millis(500)) {
-            Ok(msg) => {
-                let Some(m) = parse_message(&msg) else { continue };
-                *by_id.entry(m.id).or_default() += 1;
-                if m.id == ttp::protocol::STREAM_ID_GAZE {
-                    gaze += 1;
-                    if let Some(g) = ttp::gaze83::decode_gaze_frame(&m) {
-                        // Count frames where the device actually tracked an eye.
-                        if g.left.gaze_point_norm.valid || g.right.gaze_point_norm.valid || g.left.pupil_diameter_mm.valid {
-                            valid += 1;
-                        }
-                    }
-                    // Dump the raw keyed fields of the first few gaze frames so
-                    // we can see what the device actually reports (validity keys,
-                    // pupil status) rather than trust the decoder's summary.
-                    if gaze_dumped < 3 {
-                        gaze_dumped += 1;
-                        dump_keyed("gaze 0x500", m.payload);
-                    }
-                } else {
-                    other += 1;
-                    if m.id == ttp::protocol::STREAM_ID_PRESENCE && pres_dumped < 2 {
-                        pres_dumped += 1;
-                        dump_keyed("presence 0x504", m.payload);
+        if let Ok(msg) = rx.recv_timeout(Duration::from_millis(500)) {
+            let Some(m) = parse_message(&msg) else {
+                continue;
+            };
+            *by_id.entry(m.id).or_default() += 1;
+            if m.id == ttp::protocol::STREAM_ID_GAZE {
+                gaze += 1;
+                if let Some(g) = ttp::gaze83::decode_gaze_frame(&m) {
+                    // Count frames where the device actually tracked an eye.
+                    if g.left.gaze_point_norm.valid
+                        || g.right.gaze_point_norm.valid
+                        || g.left.pupil_diameter_mm.valid
+                    {
+                        valid += 1;
                     }
                 }
+                // Dump the raw keyed fields of the first few gaze frames so
+                // we can see what the device actually reports (validity keys,
+                // pupil status) rather than trust the decoder's summary.
+                if gaze_dumped < 3 {
+                    gaze_dumped += 1;
+                    dump_keyed("gaze 0x500", m.payload);
+                }
+            } else {
+                other += 1;
+                if m.id == ttp::protocol::STREAM_ID_PRESENCE && pres_dumped < 2 {
+                    pres_dumped += 1;
+                    dump_keyed("presence 0x504", m.payload);
+                }
             }
-            Err(_) => {}
         }
     }
     let secs = start.elapsed().as_secs_f64();
-    log!("over {secs:.1}s: {gaze} gaze = {:.1}/s, {valid} VALID (eye tracked), {other} other", gaze as f64 / secs);
+    log!(
+        "over {secs:.1}s: {gaze} gaze = {:.1}/s, {valid} VALID (eye tracked), {other} other",
+        gaze as f64 / secs
+    );
     log!("by stream id: {by_id:?}");
 }
 
@@ -372,16 +425,28 @@ fn dump_keyed(label: &str, payload: &[u8]) {
                 scalars.push(format!("{k:#04x}:t{typ}={bits:#x}{fx}"));
             }
             Some(KeyedValue::Point { id, raw, len }) => {
-                points.push(format!("{k:#04x}:pt{id:#x}[{}]{:?}", len, &raw[..len.min(3)]));
+                points.push(format!(
+                    "{k:#04x}:pt{id:#x}[{}]{:?}",
+                    len,
+                    &raw[..len.min(3)]
+                ));
             }
             None => {}
         }
     }
-    log!("{label} ({} B): scalars {}", payload.len(), scalars.join(" "));
+    log!(
+        "{label} ({} B): scalars {}",
+        payload.len(),
+        scalars.join(" ")
+    );
     if !points.is_empty() {
         log!("{label} points: {}", points.join(" "));
     }
-    let hex: String = payload.iter().take(160).map(|b| format!("{b:02x}")).collect();
+    let hex: String = payload
+        .iter()
+        .take(160)
+        .map(|b| format!("{b:02x}"))
+        .collect();
     log!("{label} hex[..160]: {hex}");
 }
 
@@ -404,10 +469,57 @@ fn serial_number(h: &DeviceHandle<GlobalContext>) -> Option<String> {
     h.read_serial_number_string_ascii(&desc).ok()
 }
 
+/// Serve the tracker to Tobii SDK 3 as a network tetserver (see
+/// [`tetserver`]): TTP over TCP, announced over Bonjour. Failure here only
+/// costs SDK 3 clients; the local socket keeps working.
+fn start_tetserver(bridge: &Arc<Bridge>, port: u16, serial: &str, scp: &[(String, String)]) {
+    if let Err(e) = tetserver::serve(bridge.clone(), port, 1000) {
+        log!(
+            "tetserver: cannot listen on TCP port {port}: {e}; SDK 3 clients will not see the tracker"
+        );
+        return;
+    }
+    let t0 = Instant::now();
+    match tetserver::prime(bridge) {
+        Ok((sent, failed)) => log!(
+            "tetserver: tracker initialised for SDK 3 ({sent} commands, {failed} refused, {} ms)",
+            t0.elapsed().as_millis()
+        ),
+        Err(e) => log!("tetserver: init replay failed ({e}); SDK 3 gaze may stay invalid"),
+    }
+    let scp_value = |key: &str| {
+        scp.iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.clone())
+            .unwrap_or_default()
+    };
+    let advert = tetserver::Advert {
+        serial: serial.to_owned(),
+        model: tetserver::Advert::model_for(serial).to_owned(),
+        firmware: scp_value("/fw/fwversion"),
+        platform: scp_value("/hw/platformtype"),
+    };
+    match tetserver::advertise(&advert, port) {
+        Ok((name, addresses)) => log!(
+            "tetserver: listening on TCP port {port}, announced as {name}._tetserver._tcp \
+             (Tobii SDK 3 sees {serial}) at {}",
+            addresses.join(", ")
+        ),
+        Err(e) => log!(
+            "tetserver: listening on TCP port {port}, not announced ({e}); SDK 3 clients can \
+             still connect by address"
+        ),
+    }
+}
+
 /// Query the device's SCP metadata (request 48), as the services do at open,
-/// and log it: it names the platform and firmware.
-fn scp_metadata(h: &DeviceHandle<GlobalContext>) {
-    let req: [u8; 24] = [1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+/// log it and return its `key=value` pairs: they name the platform and
+/// firmware.
+fn scp_metadata(h: &DeviceHandle<GlobalContext>) -> Vec<(String, String)> {
+    let mut pairs = Vec::new();
+    let req: [u8; 24] = [
+        1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    ];
     let mut buf = [0u8; 512];
     let res = h
         .write_control(0x41, REQ_SCP, 0, 0, &req, CTRL_TIMEOUT)
@@ -421,11 +533,15 @@ fn scp_metadata(h: &DeviceHandle<GlobalContext>) {
             let text = String::from_utf8_lossy(&buf[24..end]).replace(char::from(0), "");
             for line in text.lines().filter(|l| !l.is_empty()) {
                 log!("scp: {line}");
+                if let Some((k, v)) = line.split_once('=') {
+                    pairs.push((k.trim().to_owned(), v.trim().to_owned()));
+                }
             }
         }
         Ok(n) => log!("scp: short reply ({n} bytes)"),
         Err(e) => log!("scp query failed: {e}"),
     }
+    pairs
 }
 
 /// Read EP 0x83 forever, reassemble `[mask][total]` frames and deliver each
@@ -445,8 +561,11 @@ fn usb_read_loop(usb: &Handle, slots: &Slots) {
         while pending.len() >= 8 {
             let mask = u32::from_le_bytes(pending[0..4].try_into().unwrap());
             let total = u32::from_le_bytes(pending[4..8].try_into().unwrap()) as usize;
-            if total < 8 || total > 512 * 1024 {
-                log!("usb: bad frame header mask={mask:#x} total={total}; dropping {} bytes", pending.len());
+            if !(8..=512 * 1024).contains(&total) {
+                log!(
+                    "usb: bad frame header mask={mask:#x} total={total}; dropping {} bytes",
+                    pending.len()
+                );
                 pending.clear();
                 break;
             }
@@ -466,7 +585,9 @@ fn deliver(slots: &Slots, mask: u32, payload: &[u8]) {
         if mask & (1 << ch) == 0 {
             continue;
         }
-        let Some(writer) = slots[ch].as_mut() else { continue };
+        let Some(writer) = slots[ch].as_mut() else {
+            continue;
+        };
         if let Err(e) = writer.write_all(payload).and_then(|_| writer.flush()) {
             log!("channel {ch}: client write failed ({e}); dropping it");
             slots[ch] = None;
@@ -486,12 +607,17 @@ fn handle_client(b: &Bridge, n: usize, conn: Conn) {
 }
 
 fn ttp_client(b: &Bridge, n: usize, conn: Conn) {
-    let Conn { mut reader, writer, .. } = conn;
+    let Conn {
+        mut reader, writer, ..
+    } = conn;
     let Some(ch) = allocate_channel(b, writer) else {
         log!("client {n}: no free TTP channel");
         return;
     };
-    if let Err(e) = b.usb.write_control(0x41, REQ_CHANNEL_OPEN, ch as u16, 0, &[], CTRL_TIMEOUT) {
+    if let Err(e) = b
+        .usb
+        .write_control(0x41, REQ_CHANNEL_OPEN, ch as u16, 0, &[], CTRL_TIMEOUT)
+    {
         log!("client {n}: channel {ch} open failed: {e}");
         b.slots.lock().unwrap()[ch] = None;
         return;
@@ -516,7 +642,9 @@ fn ttp_client(b: &Bridge, n: usize, conn: Conn) {
         }
     }
     b.slots.lock().unwrap()[ch] = None;
-    let res = b.usb.write_control(0x41, REQ_CHANNEL_CLOSE, ch as u16, 0, &[], CTRL_TIMEOUT);
+    let res = b
+        .usb
+        .write_control(0x41, REQ_CHANNEL_CLOSE, ch as u16, 0, &[], CTRL_TIMEOUT);
     log!("client {n}: TTP channel {ch} closed ({res:?})");
 }
 
@@ -555,7 +683,11 @@ fn send_to_device(b: &Bridge, ch: usize, data: &[u8]) -> rusb::Result<()> {
 /// (22 bytes: u32 client slot + the 18 bytes), and the 18 bytes after the
 /// slot in the device's answer go back to the client.
 fn timesync_client(b: &Bridge, n: usize, conn: Conn) {
-    let Conn { mut reader, mut writer, .. } = conn;
+    let Conn {
+        mut reader,
+        mut writer,
+        ..
+    } = conn;
     let mut req = [0u8; 18];
     while reader.read_exact(&mut req).is_ok() {
         let mut pkt = [0u8; 22];
@@ -564,10 +696,17 @@ fn timesync_client(b: &Bridge, n: usize, conn: Conn) {
         let res = b
             .usb
             .write_control(0x41, REQ_TIMESYNC, 1, 0, &pkt, CTRL_TIMEOUT)
-            .and_then(|_| b.usb.read_control(0xC1, REQ_TIMESYNC, 1, 0, &mut pkt, CTRL_TIMEOUT));
+            .and_then(|_| {
+                b.usb
+                    .read_control(0xC1, REQ_TIMESYNC, 1, 0, &mut pkt, CTRL_TIMEOUT)
+            });
         match res {
             Ok(22) => {
-                if writer.write_all(&pkt[4..22]).and_then(|_| writer.flush()).is_err() {
+                if writer
+                    .write_all(&pkt[4..22])
+                    .and_then(|_| writer.flush())
+                    .is_err()
+                {
                     break;
                 }
             }
@@ -587,10 +726,17 @@ fn timesync_client(b: &Bridge, n: usize, conn: Conn) {
 /// Mode 6: answer every 24-byte SCP request "not supported", as the Linux
 /// service does for requests it does not serve itself.
 fn scp_client(n: usize, conn: Conn) {
-    let Conn { mut reader, mut writer, .. } = conn;
+    let Conn {
+        mut reader,
+        mut writer,
+        ..
+    } = conn;
     let mut req = [0u8; 24];
     while reader.read_exact(&mut req).is_ok() {
-        log!("client {n}: SCP request {:02x?}, answering not supported", &req);
+        log!(
+            "client {n}: SCP request {:02x?}, answering not supported",
+            &req
+        );
         let mut rsp = [0u8; 24];
         rsp[0..4].copy_from_slice(&1u32.to_le_bytes());
         rsp[4..8].copy_from_slice(&1u32.to_le_bytes());

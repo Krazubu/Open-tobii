@@ -6,13 +6,13 @@
 //! calibration and licence forwarding are not here yet; their requests are
 //! acknowledged so the client is not left waiting.
 
+use super::translate::{self, EyeGaze, PropValue, prop};
 use super::transport::{Channel, Listener};
-use super::translate::{self, prop, EyeGaze, PropValue};
-use super::wire::{op, Message, Struct};
+use super::wire::{Message, Struct, op};
 use crate::ttp::calibration::{self, cmd as calcmd};
 use crate::ttp::gaze83::{self, EyeFrame};
 use crate::ttp::session::Session;
-use crate::ttp::{facts, protocol::cmd, protocol::parse_message, protocol::STREAM_ID_GAZE};
+use crate::ttp::{facts, protocol::STREAM_ID_GAZE, protocol::cmd, protocol::parse_message};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -60,29 +60,31 @@ impl Properties {
             calibration_active: false,
             enabled_eye: 0,
         };
-        if let Ok(b) = session.command(cmd::DISPLAY_AREA_GET, &[0, 0]) {
-            if let Some(a) = parse_message(&b).and_then(|m| facts::display_area_9(&m)) {
-                *p.display_area.lock().unwrap() = a;
-            }
+        if let Ok(b) = session.command(cmd::DISPLAY_AREA_GET, &[0, 0])
+            && let Some(a) = parse_message(&b).and_then(|m| points_f32::<9>(&m))
+        {
+            *p.display_area.lock().unwrap() = a;
         }
-        if let Ok(b) = session.command(cmd::TRACK_BOX, &[0, 0]) {
-            if let Some(a) = parse_message(&b).and_then(|m| facts::track_box_24(&m)) {
-                p.track_box = a;
-            }
+        if let Ok(b) = session.command(cmd::TRACK_BOX, &[0, 0])
+            && let Some(a) = parse_message(&b).and_then(|m| points_f32::<24>(&m))
+        {
+            p.track_box = a;
         }
-        if let Ok(b) = session.command(cmd::OUTPUT_RATE, &[0, 0]) {
-            if let Some(hz) = parse_message(&b).and_then(|m| facts::output_rate(&m)) {
-                p.output_frequency = hz as f32;
-            }
+        if let Ok(b) = session.command(cmd::OUTPUT_RATE, &[0, 0])
+            && let Some(hz) = parse_message(&b)
+                .and_then(|m| facts::parse_output_rate(&m))
+                .map(|(_sensor, output)| output)
+        {
+            p.output_frequency = hz as f32;
         }
-        if let Ok(b) = session.command(cmd::DEVICE_STRINGS, &[0, 0]) {
-            if let Some(m) = parse_message(&b) {
-                let s = facts::device_strings(&m);
-                // serial, model, generation, firmware: PETM's device name is
-                // the model.
-                if let Some(model) = s.get(1) {
-                    p.device_name = model.clone();
-                }
+        if let Ok(b) = session.command(cmd::DEVICE_STRINGS, &[0, 0])
+            && let Some(m) = parse_message(&b)
+        {
+            let s: Vec<String> = m.tlvs().filter_map(|t| t.string()).collect();
+            // serial, model, generation, firmware: PETM's device name is
+            // the model.
+            if let Some(model) = s.get(1) {
+                p.device_name = model.clone();
             }
         }
         p
@@ -98,7 +100,9 @@ impl Properties {
             prop::CALIBRATION_ID => PropValue::U32(self.calibration_id.load(Ordering::Relaxed)),
             prop::CALIBRATION_ACTIVE => PropValue::U32(self.calibration_active.into()),
             prop::ENABLED_EYE => PropValue::U32(self.enabled_eye),
-            prop::POWER_SAVE_ACTIVE | prop::DEVICE_PAUSED | prop::EXCLUSIVE_MODE => PropValue::U32(0),
+            prop::POWER_SAVE_ACTIVE | prop::DEVICE_PAUSED | prop::EXCLUSIVE_MODE => {
+                PropValue::U32(0)
+            }
             prop::FAULTS | prop::WARNINGS => PropValue::Str(String::new()),
             _ => return None,
         })
@@ -126,7 +130,11 @@ impl Properties {
 /// thread) and, in the background, the subscription and time sync channels and
 /// the gaze-stream forwarder. The three channels are independent, so discovery
 /// (command only) is never held up by the others. Loops forever.
-pub fn run_server(session: Arc<Session>, listener: Listener, props: Arc<Properties>) -> std::io::Result<()> {
+pub fn run_server(
+    session: Arc<Session>,
+    listener: Listener,
+    props: Arc<Properties>,
+) -> std::io::Result<()> {
     let listener = Arc::new(listener);
     let subs = Arc::new(Subs::default());
     let sink: SubSink = Arc::new(Mutex::new(None));
@@ -134,10 +142,12 @@ pub fn run_server(session: Arc<Session>, listener: Listener, props: Arc<Properti
     // Subscription channel: accept it and keep the latest as the stream sink.
     {
         let (listener, sink) = (listener.clone(), sink.clone());
-        std::thread::spawn(move || loop {
-            match listener.accept_sub() {
-                Ok(ch) => *sink.lock().unwrap() = Some(ch),
-                Err(_) => std::thread::sleep(Duration::from_millis(200)),
+        std::thread::spawn(move || {
+            loop {
+                match listener.accept_sub() {
+                    Ok(ch) => *sink.lock().unwrap() = Some(ch),
+                    Err(_) => std::thread::sleep(Duration::from_millis(200)),
+                }
             }
         });
     }
@@ -145,10 +155,12 @@ pub fn run_server(session: Arc<Session>, listener: Listener, props: Arc<Properti
     // Time sync channel: answer timestamp requests.
     {
         let listener = listener.clone();
-        std::thread::spawn(move || loop {
-            match listener.accept_timesync() {
-                Ok(ch) => serve_timesync(ch),
-                Err(_) => std::thread::sleep(Duration::from_millis(200)),
+        std::thread::spawn(move || {
+            loop {
+                match listener.accept_timesync() {
+                    Ok(ch) => serve_timesync(ch),
+                    Err(_) => std::thread::sleep(Duration::from_millis(200)),
+                }
             }
         });
     }
@@ -164,7 +176,9 @@ pub fn run_server(session: Arc<Session>, listener: Listener, props: Arc<Properti
             let (mut total, mut gaze_frames, mut fwd) = (0u64, 0u64, 0u64);
             for msg in rx {
                 total += 1;
-                let Some(parsed) = parse_message(&msg) else { continue };
+                let Some(parsed) = parse_message(&msg) else {
+                    continue;
+                };
                 if debug && total <= 20 {
                     eprintln!("fwd: stream id {:#x} ({} B)", parsed.id, msg.len());
                 }
@@ -172,11 +186,16 @@ pub fn run_server(session: Arc<Session>, listener: Listener, props: Arc<Properti
                     continue;
                 }
                 gaze_frames += 1;
-                let Some(frame) = gaze83::decode_gaze_frame(&parsed) else { continue };
+                let Some(frame) = gaze83::decode_gaze_frame(&parsed) else {
+                    continue;
+                };
                 let gaze = subs.gaze.load(Ordering::Relaxed);
                 let position = subs.position.load(Ordering::Relaxed);
                 if debug && gaze_frames % 60 == 1 {
-                    eprintln!("fwd: gaze#{gaze_frames} sub(g={gaze},p={position}) sink={} forwarded={fwd}", sink.lock().unwrap().is_some());
+                    eprintln!(
+                        "fwd: gaze#{gaze_frames} sub(g={gaze},p={position}) sink={} forwarded={fwd}",
+                        sink.lock().unwrap().is_some()
+                    );
                 }
                 if !gaze && !position {
                     continue;
@@ -219,7 +238,8 @@ pub fn run_server(session: Arc<Session>, listener: Listener, props: Arc<Properti
     loop {
         match listener.accept_command() {
             Ok(ch) => {
-                let (session, props, subs, sink) = (session.clone(), props.clone(), subs.clone(), sink.clone());
+                let (session, props, subs, sink) =
+                    (session.clone(), props.clone(), subs.clone(), sink.clone());
                 std::thread::spawn(move || serve_command(ch, &session, &props, &subs, &sink));
             }
             Err(e) => {
@@ -231,7 +251,13 @@ pub fn run_server(session: Arc<Session>, listener: Listener, props: Arc<Properti
 }
 
 /// Serve one command connection until it closes.
-fn serve_command(mut command: Channel, session: &Session, props: &Properties, subs: &Subs, sink: &SubSink) {
+fn serve_command(
+    mut command: Channel,
+    session: &Session,
+    props: &Properties,
+    subs: &Subs,
+    sink: &SubSink,
+) {
     let debug = std::env::var("PRP_DEBUG").is_ok();
     loop {
         let req = match command.read_frame() {
@@ -244,7 +270,11 @@ fn serve_command(mut command: Channel, session: &Session, props: &Properties, su
             }
         };
         if debug {
-            let detail = if req.operation == op::COMMAND_REQUEST { cmd_id(&req) } else { property_of(&req) };
+            let detail = if req.operation == op::COMMAND_REQUEST {
+                cmd_id(&req)
+            } else {
+                property_of(&req)
+            };
             eprintln!("cmd: op {} detail {}", req.operation, detail);
         }
         let tx = req.transaction;
@@ -267,18 +297,26 @@ fn serve_command(mut command: Channel, session: &Session, props: &Properties, su
             op::PROPERTY_SET_REQUEST => {
                 let property = property_of(&req);
                 let value = req.parts.get(1).cloned().unwrap_or_default();
-                if property == prop::DISPLAY_AREA {
-                    if let Ok(area) = <[f32; 9]>::try_from(
-                        value.words.iter().map(|w| f32::from_bits(*w)).collect::<Vec<_>>(),
-                    ) {
-                        props.set_display_area(area);
-                        push_notification(sink, prop::DISPLAY_AREA, PropValue::Floats(area.to_vec()));
-                        if debug {
-                            eprintln!("display area set to {area:?}");
-                        }
+                if property == prop::DISPLAY_AREA
+                    && let Ok(area) = <[f32; 9]>::try_from(
+                        value
+                            .words
+                            .iter()
+                            .map(|w| f32::from_bits(*w))
+                            .collect::<Vec<_>>(),
+                    )
+                {
+                    props.set_display_area(area);
+                    push_notification(sink, prop::DISPLAY_AREA, PropValue::Floats(area.to_vec()));
+                    if debug {
+                        eprintln!("display area set to {area:?}");
                     }
                 }
-                Message::new(tx, op::PROPERTY_SET_RESPONSE, vec![Struct::new(vec![0, property]), value])
+                Message::new(
+                    tx,
+                    op::PROPERTY_SET_RESPONSE,
+                    vec![Struct::new(vec![0, property]), value],
+                )
             }
             op::COMMAND_REQUEST => handle_command(session, props, subs, sink, &req),
             other => {
@@ -310,7 +348,10 @@ fn serve_timesync(mut ch: Channel) {
             let resp = Message::new(
                 req.transaction,
                 op::COMMAND_RESPONSE,
-                vec![super::wire::Struct::new(vec![0, cmd_id(&req)]), super::wire::Struct::new(vec![us])],
+                vec![
+                    super::wire::Struct::new(vec![0, cmd_id(&req)]),
+                    super::wire::Struct::new(vec![us]),
+                ],
             );
             if ch.write_frame(&resp).is_err() {
                 break;
@@ -336,7 +377,9 @@ fn push_notification(sink: &SubSink, property: u32, value: PropValue) {
     let debug = std::env::var("PRP_DEBUG").is_ok();
     match sink.lock().unwrap().as_ref() {
         Some(ch) => {
-            let ok = ch.write_frame(&translate::property_notification(property, &value)).is_ok();
+            let ok = ch
+                .write_frame(&translate::property_notification(property, &value))
+                .is_ok();
             if debug {
                 eprintln!("notify: property {property} pushed (write ok={ok})");
             }
@@ -349,7 +392,13 @@ fn push_notification(sink: &SubSink, property: u32, value: PropValue) {
     }
 }
 
-fn handle_command(session: &Session, props: &Properties, subs: &Subs, sink: &SubSink, req: &Message) -> Message {
+fn handle_command(
+    session: &Session,
+    props: &Properties,
+    subs: &Subs,
+    sink: &SubSink,
+    req: &Message,
+) -> Message {
     let tx = req.transaction;
     let command = cmd_id(req);
     let arg = property_of_arg(req);
@@ -436,7 +485,13 @@ fn handle_command(session: &Session, props: &Properties, subs: &Subs, sink: &Sub
             eprintln!("calib: COLLECT_2D point ({x:.4}, {y:.4})");
             // collect_payload already begins with the `00 00` a payload starts
             // with (TlvWriter); do not prepend another.
-            calib(session, tx, command, calcmd::COLLECT_2D, &calibration::collect_payload(x, y, calibration::EYES_BOTH))
+            calib(
+                session,
+                tx,
+                command,
+                calcmd::COLLECT_2D,
+                &calibration::collect_payload(x, y, calibration::EYES_BOTH),
+            )
         }
         // Calibration compute and apply: the device computes, then the runtime
         // assigns a new calibration id and notifies it. PETM waits for the id
@@ -444,7 +499,11 @@ fn handle_command(session: &Session, props: &Properties, subs: &Subs, sink: &Sub
         // without it).
         16 => {
             let resp = calib(session, tx, command, calcmd::COMPUTE, &[0, 0]);
-            push_notification(sink, prop::CALIBRATION_ID, PropValue::U32(props.new_calibration_id()));
+            push_notification(
+                sink,
+                prop::CALIBRATION_ID,
+                PropValue::U32(props.new_calibration_id()),
+            );
             resp
         }
         17 => calibration_retrieve(session, tx, command),
@@ -490,7 +549,10 @@ fn ttp_step(session: &Session, ttp_cmd: u32, payload: &[u8]) {
     match session.command(ttp_cmd, payload) {
         Ok(b) => {
             let err = parse_message(&b).map(|m| m.error).unwrap_or(0);
-            eprintln!("calib: TTP {ttp_cmd} -> error {err:#010x} ({} B response)", b.len());
+            eprintln!(
+                "calib: TTP {ttp_cmd} -> error {err:#010x} ({} B response)",
+                b.len()
+            );
         }
         Err(e) => eprintln!("prp: calibration TTP command {ttp_cmd} failed: {e}"),
     }
@@ -505,11 +567,14 @@ fn calibration_retrieve(session: &Session, tx: u32, prp_cmd: u32) -> Message {
         // blob_from_payload skips the leading `00 00` itself (payload_tlvs);
         // pass the whole payload, as the working embedded-blob read does. The
         // earlier `get(2..)` skipped it twice and read an empty blob.
-        .and_then(|b| parse_message(&b).and_then(|m| calibration::blob_from_payload(m.payload).map(<[u8]>::to_vec)))
+        .and_then(|b| {
+            parse_message(&b)
+                .and_then(|m| calibration::blob_from_payload(m.payload).map(<[u8]>::to_vec))
+        })
         .unwrap_or_default();
     eprintln!("calib: RETRIEVE read blob {} bytes", blob.len());
     let mut var = blob;
-    while var.len() % 4 != 0 {
+    while !var.len().is_multiple_of(4) {
         var.push(0);
     }
     Message::new(
@@ -524,11 +589,11 @@ fn calibration_retrieve(session: &Session, tx: u32, prp_cmd: u32) -> Message {
 
 /// Start the device's 0x500 gaze stream once; both PRP streams come from it.
 fn ensure_device_stream(session: &Session, subs: &Subs) {
-    if !subs.device_started.swap(true, Ordering::Relaxed) {
-        if let Err(e) = session.start_stream(STREAM_ID_GAZE) {
-            eprintln!("prp: starting the gaze stream failed: {e}");
-            subs.device_started.store(false, Ordering::Relaxed);
-        }
+    if !subs.device_started.swap(true, Ordering::Relaxed)
+        && let Err(e) = session.start_stream(STREAM_ID_GAZE)
+    {
+        eprintln!("prp: starting the gaze stream failed: {e}");
+        subs.device_started.store(false, Ordering::Relaxed);
     }
 }
 
@@ -540,7 +605,10 @@ fn eye_gaze(e: &EyeFrame) -> EyeGaze {
         track_box: f3(e.track_box.value),
         point_valid: e.gaze_point_norm.valid,
         point_mm: f3(e.gaze_point_tracker_mm.value),
-        point_display: [e.gaze_point_norm.value[0] as f32, e.gaze_point_norm.value[1] as f32],
+        point_display: [
+            e.gaze_point_norm.value[0] as f32,
+            e.gaze_point_norm.value[1] as f32,
+        ],
         eyeball_valid: e.eyeball_center_mm.valid,
         eyeball_mm: f3(e.eyeball_center_mm.value),
         pupil_valid: e.pupil_diameter_mm.valid,
@@ -559,4 +627,18 @@ fn hex(b: &[u8]) -> String {
 /// The single `u32` argument of a command (its second struct's first field).
 fn property_of_arg(req: &Message) -> u32 {
     req.parts.get(1).and_then(|s| s.word(0)).unwrap_or(0)
+}
+
+/// The first `N / 3` 3-D points of a geometry reply, flattened to `N` floats
+/// (mm, wire order): the nine PETM expects for the display area (command
+/// 1430: top-left, top-right, bottom-left) and the 24 for the track box
+/// (command 1400: eight corners).
+fn points_f32<const N: usize>(msg: &crate::ttp::protocol::Message<'_>) -> Option<[f32; N]> {
+    let points = facts::parse_points_mm(msg);
+    let corners = points.get(..N / 3)?;
+    let mut out = [0f32; N];
+    for (slot, v) in out.iter_mut().zip(corners.iter().flatten()) {
+        *slot = *v as f32;
+    }
+    Some(out)
 }

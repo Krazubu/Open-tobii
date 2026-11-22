@@ -48,7 +48,10 @@ pub struct Struct {
 impl Struct {
     /// A struct with these words and no variable area.
     pub fn new(words: Vec<u32>) -> Self {
-        Struct { words, var: Vec::new() }
+        Struct {
+            words,
+            var: Vec::new(),
+        }
     }
 
     /// A struct with these words and this variable area.
@@ -93,7 +96,11 @@ pub struct Message {
 
 impl Message {
     pub fn new(transaction: u32, operation: u32, parts: Vec<Struct>) -> Self {
-        Message { transaction, operation, parts }
+        Message {
+            transaction,
+            operation,
+            parts,
+        }
     }
 }
 
@@ -175,7 +182,10 @@ fn write_struct(out: &mut Vec<u8>, s: &Struct) {
 /// Serialise a whole message into a frame (magic, length, check, body).
 pub fn write_frame(msg: &Message) -> Vec<u8> {
     let mut body = Vec::new();
-    write_struct(&mut body, &Struct::new(vec![msg.transaction, msg.operation]));
+    write_struct(
+        &mut body,
+        &Struct::new(vec![msg.transaction, msg.operation]),
+    );
     for p in &msg.parts {
         write_struct(&mut body, p);
     }

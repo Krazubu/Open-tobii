@@ -14,7 +14,7 @@ use rusb::{DeviceHandle, GlobalContext, UsbContext};
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
+use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -51,8 +51,8 @@ pub struct Session {
 
 impl Session {
     /// Open channel 0 on an already-claimed device handle, start the reader,
-    /// and replay the init sequence from `init_packets` (the lines of
-    /// `assets/ttp_init_packets.txt`, already in bulk-OUT framing).
+    /// and replay the init sequence from `init_packets` (already in bulk-OUT
+    /// framing).
     pub fn open(usb: Usb, init_packets: &[Vec<u8>]) -> rusb::Result<Self> {
         vendor_control_init(&usb)?;
 
@@ -70,7 +70,12 @@ impl Session {
                 .expect("spawn ttp reader");
         }
 
-        let session = Session { usb, seq: AtomicU32::new(1), shared, stream_rx: Mutex::new(Some(stream_rx)) };
+        let session = Session {
+            usb,
+            seq: AtomicU32::new(1),
+            shared,
+            stream_rx: Mutex::new(Some(stream_rx)),
+        };
         session.replay(init_packets)?;
         Ok(session)
     }
@@ -84,13 +89,21 @@ impl Session {
     /// Start a device stream (command 1220), waiting for its response so the
     /// device actually begins streaming (a fire-and-forget send did not take).
     pub fn start_stream(&self, id: u32) -> rusb::Result<()> {
-        self.command(protocol::cmd::STREAM_START, &protocol::stream_start_payload(id)).map(|_| ())
+        self.command(
+            protocol::cmd::STREAM_START,
+            &protocol::stream_start_payload(id),
+        )
+        .map(|_| ())
     }
 
     /// Stop a device stream (command 1230), fire and forget.
     pub fn stop_stream(&self, id: u32) -> rusb::Result<()> {
         let seq = self.next_seq();
-        self.write_command(protocol::cmd::STREAM_STOP, seq, &protocol::stream_id_payload(id))
+        self.write_command(
+            protocol::cmd::STREAM_STOP,
+            seq,
+            &protocol::stream_id_payload(id),
+        )
     }
 
     /// The next command sequence number.
@@ -169,26 +182,26 @@ impl Session {
                 self.seq.fetch_max(seq + 1, Ordering::SeqCst);
             }
             self.write_raw(pkt)?;
-            let complete = packets.get(i + 1).is_none_or(|n| command_seq_of(n).is_some());
-            if complete {
-                if let Some((seq, cmd_id, t0, rx)) = awaiting.take() {
-                    match rx.recv_timeout(CMD_TIMEOUT) {
-                        Ok(bytes) => {
-                            let ms = t0.elapsed().as_millis();
-                            let err = protocol::parse_message(&bytes).map_or(0, |m| m.error);
-                            // A healthy init command answers in milliseconds
-                            // with error 0; flag anything slow or failed.
-                            if ms > 100 || err != 0 {
-                                eprintln!("[init] cmd {cmd_id} seq {seq}: {ms} ms, error {err:#x}");
-                            }
+            let complete = packets
+                .get(i + 1)
+                .is_none_or(|n| command_seq_of(n).is_some());
+            if complete && let Some((seq, cmd_id, t0, rx)) = awaiting.take() {
+                match rx.recv_timeout(CMD_TIMEOUT) {
+                    Ok(bytes) => {
+                        let ms = t0.elapsed().as_millis();
+                        let err = protocol::parse_message(&bytes).map_or(0, |m| m.error);
+                        // A healthy init command answers in milliseconds
+                        // with error 0; flag anything slow or failed.
+                        if ms > 100 || err != 0 {
+                            eprintln!("[init] cmd {cmd_id} seq {seq}: {ms} ms, error {err:#x}");
                         }
-                        Err(_) => {
-                            self.shared.waiters.lock().unwrap().remove(&seq);
-                            eprintln!(
-                                "[init] cmd {cmd_id} seq {seq}: TIMED OUT after {} ms (no response)",
-                                t0.elapsed().as_millis()
-                            );
-                        }
+                    }
+                    Err(_) => {
+                        self.shared.waiters.lock().unwrap().remove(&seq);
+                        eprintln!(
+                            "[init] cmd {cmd_id} seq {seq}: TIMED OUT after {} ms (no response)",
+                            t0.elapsed().as_millis()
+                        );
                     }
                 }
             }
@@ -198,7 +211,6 @@ impl Session {
         }
         Ok(())
     }
-
 }
 
 /// The sequence number a bulk-OUT packet's command expects echoed, or `None`
@@ -217,7 +229,9 @@ fn command_seq_of(pkt: &[u8]) -> Option<u32> {
 /// request 48 (SCP init) out/in, request 70 in, then request 65 wValue 0 to
 /// open channel 0.
 fn vendor_control_init(usb: &DeviceHandle<GlobalContext>) -> rusb::Result<()> {
-    let init: [u8; 24] = [1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let init: [u8; 24] = [
+        1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    ];
     usb.write_control(0x41, 48, 0, 0, &init, CTRL_TIMEOUT)?;
     let mut buf = [0u8; 512];
     usb.read_control(0xC1, 48, 0, 0, &mut buf, CTRL_TIMEOUT)?;
@@ -286,7 +300,9 @@ fn reader_loop(usb: Usb, shared: Arc<Shared>) {
     });
     let ctx_ptr = Box::into_raw(ctx);
 
-    let mut buffers: Vec<Vec<u8>> = (0..READ_TRANSFERS).map(|_| vec![0u8; READ_BUF_LEN]).collect();
+    let mut buffers: Vec<Vec<u8>> = (0..READ_TRANSFERS)
+        .map(|_| vec![0u8; READ_BUF_LEN])
+        .collect();
     let mut transfers: Vec<*mut libusb1_sys::libusb_transfer> = Vec::with_capacity(READ_TRANSFERS);
     for buf in buffers.iter_mut() {
         let xfer = unsafe { libusb1_sys::libusb_alloc_transfer(0) };
@@ -311,9 +327,17 @@ fn reader_loop(usb: Usb, shared: Arc<Shared>) {
     }
 
     let context = usb.context().as_raw();
+    // `running` is cleared by `on_transfer`, which libusb calls from inside
+    // `libusb_handle_events_timeout_completed` below, through `ctx_ptr`.
+    #[allow(clippy::while_immutable_condition)]
     while unsafe { (*ctx_ptr).running } {
-        let tv = libc::timeval { tv_sec: 1, tv_usec: 0 };
-        unsafe { libusb1_sys::libusb_handle_events_timeout_completed(context, &tv, std::ptr::null_mut()) };
+        let tv = libc::timeval {
+            tv_sec: 1,
+            tv_usec: 0,
+        };
+        unsafe {
+            libusb1_sys::libusb_handle_events_timeout_completed(context, &tv, std::ptr::null_mut())
+        };
     }
 
     // Best-effort cleanup.
@@ -328,7 +352,9 @@ fn reader_loop(usb: Usb, shared: Arc<Shared>) {
 }
 
 fn route(shared: &Shared, msg: DeviceMessage) {
-    let Some(parsed) = protocol::parse_message(&msg) else { return };
+    let Some(parsed) = protocol::parse_message(&msg) else {
+        return;
+    };
     match parsed.marker {
         MARKER_RESPONSE => {
             if let Some(tx) = shared.waiters.lock().unwrap().remove(&parsed.seq) {
@@ -343,30 +369,22 @@ fn route(shared: &Shared, msg: DeviceMessage) {
     }
 }
 
-/// Load the init packets shipped in the binary.
+/// The init replay shipped in the binary: `tobii-usb`'s, the one the daemon
+/// replays, which carries the tracker's own power-up default calibration.
 pub fn builtin_init_packets() -> Vec<Vec<u8>> {
-    const TEXT: &str = include_str!("../../assets/ttp_init_packets.txt");
-    protocol::parse_init_packets(TEXT).expect("built-in init packets parse").into_iter().map(|p| p.data).collect()
+    tobii_usb::calibration::embedded_packets()
+        .expect("built-in init packets parse")
+        .into_iter()
+        .map(|p| p.data)
+        .collect()
 }
 
-/// The calibration blob the init replay uploads (command 1110, pieces 38..200
-/// of the init packets). Opening a calibration session seeds the device's
-/// sample ring by writing this blob back (1110); the device holds no
-/// user calibration to read, so a 1100 read comes back empty. Extracted exactly
-/// as tobii-linux's `tobii_usb::calibration::embedded_blob` does, from the
-/// byte-identical init file.
+/// The calibration blob the init replay uploads (its command 1110): the
+/// tracker's power-up default. Opening a calibration session seeds the
+/// device's sample ring by writing this blob back (1110); the device holds no
+/// user calibration to read, so a 1100 read comes back empty.
 pub fn embedded_calibration_blob() -> Vec<u8> {
-    let packets = builtin_init_packets();
-    let Some(pieces) = packets.get(38..200) else { return Vec::new() };
-    // Strip each piece's 8-byte `[channel][len]` bulk framing and concatenate
-    // the 1110 command's TTP message, then parse it like any message (its own
-    // header sits at offset 8, so stand in 8 zero bytes for the framing).
-    let message: Vec<u8> = pieces.iter().flat_map(|p| p.get(8..).unwrap_or_default().iter().copied()).collect();
-    let prefixed = [&[0u8; 8][..], &message].concat();
-    protocol::parse_message(&prefixed)
-        .and_then(|m| super::calibration::blob_from_payload(m.payload))
-        .map(<[u8]>::to_vec)
-        .unwrap_or_default()
+    tobii_usb::calibration::embedded_blob().unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -374,7 +392,10 @@ mod embedded_blob_tests {
     #[test]
     fn embedded_blob_is_present() {
         let blob = super::embedded_calibration_blob();
-        eprintln!("embedded calibration blob: {} bytes", blob.len());
-        assert!(blob.len() > 100, "embedded blob should be a real calibration, got {}", blob.len());
+        assert!(
+            blob.len() > 100,
+            "embedded blob should be a real calibration, got {}",
+            blob.len()
+        );
     }
 }

@@ -40,6 +40,10 @@ impl Pending {
         let mut mode = [0u8; 1];
         self.0.read_exact(&mut mode)?;
         let writer = self.0.try_clone()?;
-        Ok(Conn { mode: u32::from(mode[0]), reader: Box::new(self.0), writer: Box::new(writer) })
+        Ok(Conn {
+            mode: u32::from(mode[0]),
+            reader: Box::new(self.0),
+            writer: Box::new(writer),
+        })
     }
 }

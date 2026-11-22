@@ -1,4 +1,9 @@
-# tobii-et5-bridge
+# ttpbridge (formerly tobii-et5-bridge)
+
+> Part of [open-tobii](../../README.md), in `crates/tobii-bridge`. It shares
+> the daemon's protocol code (`tobii-proto`) and init replay (`tobii-usb`).
+> Paths below are relative to this directory; run `cargo` from the
+> repository root.
 
 Use a **Tobii Eye Tracker 5** with **Tobii Pro Eye Tracker Manager** (PETM) on
 macOS.
@@ -28,11 +33,12 @@ Nothing else from Tobii is needed or included here.
 
 ## Build
 
-Requires a Rust toolchain. libusb is compiled from source, so there is nothing
-else to install.
+Requires a Rust toolchain. With `--features vendored`, libusb is compiled
+from source, so there is nothing else to install (without it, the system's
+libusb is used).
 
 ```sh
-cargo build --release
+cargo build --release -p ttpbridge --features vendored
 ```
 
 This gives `target/release/ttpbridge` (the bridge) and
@@ -44,7 +50,7 @@ since the two only meet through a socket.
 ## Run
 
 Quit anything else that holds the tracker (for instance `tobiid` from
-[tobii-linux](https://github.com/Krazubu/tobii-linux)), then:
+this repository), then:
 
 ```sh
 sudo target/release/ttpbridge
@@ -68,6 +74,50 @@ root:
 target/release/ttpbridge --dir /tmp &
 target/release/ttpclient /tmp/TOBII-<serial> --timesync
 ```
+
+### Tobii SDK 3 (Eye Tracker Browser, `TobiiSDK.framework`, `tobiictl`)
+
+The same `ttpbridge` also serves the tracker to the older Tobii SDK 3
+(`TobiiSDK.framework` 3.0, the Analytics SDK 3.x `libtetio`, and the apps
+built on them: Eye Tracker Browser, `tobiictl`, Quartz Composer plug-ins…), as
+if it were one of Tobii's network trackers (X2-60, TX300…):
+
+```
+[   0.880] tetserver: listening on TCP port 4455, announced as tetserverTPE01-100205013153._tetserver._tcp (Tobii SDK 3 sees TPE01-100205013153) at lo0 127.0.0.1, en0 192.168.1.79
+```
+
+Those trackers speak the very same TTP protocol, over TCP port 4455, and are
+found over Bonjour as `_tetserver._tcp` services named `tetserver<serial>`
+whose TXT record gives `pid`, `model`, `name`, `version`, `generation` and
+`platformtype`. The bridge announces itself that way (model "Tobii Pro Spark"
+or "Tobii Eye Tracker 5", firmware and platform from the tracker) and serves
+each TCP connection as one more TTP channel, without translating anything. An
+SDK 3 tracking session is a protocol negotiation (command 1000) and the start
+of gaze stream `0x500` (1220); its gaze messages carry the X2-60's columns
+plus more, which SDK 3 skips.
+
+- SDK 3 never initialises the tracker (Eye Tracker Manager does), and an
+  uninitialised tracker streams nothing but "eye not found". So, with the
+  tetserver on, the bridge replays the built-in init (the daemon's, with the
+  power-up default calibration) on a channel of its own at start-up, before
+  announcing it: `tetserver: tracker initialised for SDK 3 (…)`. Checked with
+  the original TobiiToQC2 Quartz Composer plug-in on a Pro Spark.
+- Port 4455 listens on every interface, as a network tracker does, so other
+  machines on the network can see and use the tracker too. `--no-tetserver`
+  turns this off; `--tetserver-port <port>` moves it.
+- The service points at a host name of the bridge's own,
+  `tetserver-<serial>.local`, whose only addresses are the Mac's IPv4 ones
+  (each interface announces its own, `127.0.0.1` locally). SDK 3 knows only
+  IPv4: pointed at the Mac's own name, which also resolves to IPv6 addresses,
+  it never connects and its `createEyeTracker` never returns, which freezes
+  any app that calls it on the main thread (the original TobiiToQC2 plug-in
+  does).
+- Bonjour announcing is macOS only for now; elsewhere SDK 3 can connect by
+  address (`tobiictl -t <host>`).
+- A difference with the X2-60: when an eye is not found, the Spark gives
+  (0, 0) as its 2D gaze point where the X2-60 gives (−1, −1). The validity
+  codes are the same (4 = not found), so rely on those.
+- Not checked yet: calibration and time synchronisation through SDK 3.
 
 ### Windows
 
@@ -103,7 +153,7 @@ rustup target add aarch64-pc-windows-gnullvm
 PATH="$HOME/opt/llvm-mingw/bin:$PATH" \
 CC_aarch64_pc_windows_gnullvm=aarch64-w64-mingw32-clang \
 AR_aarch64_pc_windows_gnullvm=llvm-ar \
-cargo build --release --target aarch64-pc-windows-gnullvm
+cargo build --release -p ttpbridge --features vendored --target aarch64-pc-windows-gnullvm
 cp ~/opt/llvm-mingw/aarch64-w64-mingw32/bin/libunwind.dll target/aarch64-pc-windows-gnullvm/release/
 ```
 
@@ -165,7 +215,7 @@ succeeds.
 `ttpbridge` reproduces the client side of Tobii's USB service for Linux
 (`tobiiusbserviced` 2.1.5), recovered by static analysis of that service and
 of Tobii's macOS Platform Runtime, and checked against USB captures of the
-Windows software from tobii-linux.
+Windows software (the ones the rest of this repository is built on).
 
 | Step | Detail |
 |---|---|

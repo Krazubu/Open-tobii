@@ -80,7 +80,7 @@ Verified on a live Spark (`TPE01-100205013153`, fw `615b6e3dfa`) on macOS:
    or replace them (see below).
 
 Separately, Tobii's own SDK (PETM 2.7.2 with the Pro SDK 1.11 module, over
-`tobii-et5-bridge`) was captured driving the Spark through a full session —
+`ttpbridge`, in `crates/tobii-bridge`) was captured driving the Spark through a full session —
 init, display-area write (id `0x5a0`, 188 bytes vs the ET5's 164), stream
 subscribe, calibration, and live gaze/eye-image frames. That capture is the
 ground truth for a Spark-native init if one is built later.

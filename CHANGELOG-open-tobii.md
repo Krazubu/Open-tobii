@@ -48,16 +48,32 @@ companion bridge for Windows/macOS, multi-OS release binaries, and a rebrand to
 - Reverse-engineering notes and the known protocol gaps in
   [`docs/spark.md`](docs/spark.md).
 
-## Companion tool: `tobii-et5-bridge`
+## The bridge: `ttpbridge` (formerly `tobii-et5-bridge`)
 
-In the separate [`tobii-et5-bridge`](https://github.com/Krazubu/tobii-et5-bridge)
-repo (used to serve a tracker to Tobii's own Eye Tracker Manager and to capture
-the Spark's protocol):
+Now in this repository, as [`crates/tobii-bridge`](crates/tobii-bridge), with
+its history (it started as the separate
+[`tobii-et5-bridge`](https://github.com/Krazubu/tobii-et5-bridge) repo). It
+serves a tracker to Tobii's own Eye Tracker Manager and was used to capture the
+Spark's protocol. Since the move it uses `tobii-proto` instead of its own copy
+of the wire modules, and `tobii-usb`'s init replay — the one that carries the
+tracker's power-up default calibration — instead of the older 202-piece replay
+it shipped.
 
 - **Windows** support (named-pipe transport) for **ARM64, x64 and x86**, plus
   **macOS** (Apple Silicon and Intel 64-bit).
 - Pro Spark recognition and an optional **channel-traffic capture** of the
   init/stream/calibration sequence an SDK session drives.
+- **Tobii SDK 3 support** (`TobiiSDK.framework`, the Analytics SDK's
+  `libtetio`, Eye Tracker Browser, `tobiictl`): the bridge also serves the
+  tracker as a network "tetserver" — TTP over TCP port 4455, announced over
+  Bonjour as `_tetserver._tcp` — the way the X2-60 and other older trackers
+  do. Those trackers speak the same TTP, so nothing is translated: a gaze
+  session through SDK 3 was checked on a Pro Spark (`--no-tetserver` turns it
+  off). The service is announced on a host name of its own with IPv4
+  addresses only, since SDK 3 hangs on the IPv6 addresses of the Mac's name.
+  As SDK 3 never initialises the tracker, the bridge replays the built-in init
+  at start-up; gaze from a Spark then reaches SDK 3 apps (checked in Quartz
+  Composer with TobiiToQC2).
 
 ## Packaging, CI and releases
 

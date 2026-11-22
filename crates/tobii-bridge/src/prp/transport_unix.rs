@@ -104,7 +104,10 @@ fn read_hello(sock: &mut UnixStream) -> io::Result<Vec<u8>> {
             return Ok(hello);
         }
         if hello.len() > 0x200 {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "PRP hello name too long"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "PRP hello name too long",
+            ));
         }
     }
 }
@@ -118,12 +121,19 @@ fn accept_one(listener: &UnixListener, expect: ChannelKind, ack: &[u8]) -> io::R
     let hello = read_hello(&mut sock)?;
     let debug = std::env::var("PRP_DEBUG").is_ok();
     if debug {
-        eprintln!("accept {expect:?}: hello {} bytes: {:02x?}", hello.len(), &hello[..hello.len().min(16)]);
+        eprintln!(
+            "accept {expect:?}: hello {} bytes: {:02x?}",
+            hello.len(),
+            &hello[..hello.len().min(16)]
+        );
     }
     let (kind, _client_name) = server::parse_client_hello(&hello)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "bad PRP hello"))?;
     if kind != expect {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "unexpected PRP channel kind"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "unexpected PRP channel kind",
+        ));
     }
     // Same order as the capture: the `u32 1` success word, then the client's
     // pid, then the rest of the ack. Unlike Windows these all go on the one
@@ -136,7 +146,10 @@ fn accept_one(listener: &UnixListener, expect: ChannelKind, ack: &[u8]) -> io::R
     if debug {
         eprintln!("accept {expect:?}: pid {pid:#x} — handshake complete");
     }
-    Ok(Channel { sock, inbox: Vec::new() })
+    Ok(Channel {
+        sock,
+        inbox: Vec::new(),
+    })
 }
 
 /// The PRP listener: three bound AF_UNIX sockets, one per channel. PETM opens
@@ -157,7 +170,8 @@ impl Listener {
         // SDK finds by scanning /var/run/TOBIIPRP-*. PRP_MAIN_PIPE overrides the
         // name (for a logging relay). The sub/ts names are learned by PETM from
         // the command ack, so they can be anything the server also binds.
-        let main_name = std::env::var("PRP_MAIN_PIPE").unwrap_or_else(|_| format!("TOBIIPRP-{serial}"));
+        let main_name =
+            std::env::var("PRP_MAIN_PIPE").unwrap_or_else(|_| format!("TOBIIPRP-{serial}"));
         let sub_name = format!("tobii-et5-bridge-{serial}-sub");
         let ts_name = format!("tobii-et5-bridge-{serial}-ts");
         // The command socket is discovered in /var/run; the internal endpoints
@@ -165,7 +179,14 @@ impl Listener {
         let main = bind_listener(&main_dir(), &main_name)?;
         let sub = bind_listener(&internal_dir(), &sub_name)?;
         let timesync = bind_listener(&internal_dir(), &ts_name)?;
-        Ok(Listener { main, sub, timesync, main_name, sub_name, ts_name })
+        Ok(Listener {
+            main,
+            sub,
+            timesync,
+            main_name,
+            sub_name,
+            ts_name,
+        })
     }
 
     pub fn describe(&self) -> String {
@@ -177,18 +198,30 @@ impl Listener {
     pub fn accept_command(&self) -> io::Result<Channel> {
         // The macOS AF_UNIX runtime answers the command handshake with tag 0,
         // not Windows's 4 (captured from the official platform runtime).
-        accept_one(&self.main, ChannelKind::Command, &server::command_ack_tagged(0, &self.sub_name, &self.ts_name))
+        accept_one(
+            &self.main,
+            ChannelKind::Command,
+            &server::command_ack_tagged(0, &self.sub_name, &self.ts_name),
+        )
     }
 
     /// Accept one subscription connection; the stream forwarder writes to it.
     /// The macOS runtime answers with tag 0 (not Windows's 3).
     pub fn accept_sub(&self) -> io::Result<Channel> {
-        accept_one(&self.sub, ChannelKind::Subscription, &server::subscription_ack_tagged(0))
+        accept_one(
+            &self.sub,
+            ChannelKind::Subscription,
+            &server::subscription_ack_tagged(0),
+        )
     }
 
     /// Accept one time sync connection.
     pub fn accept_timesync(&self) -> io::Result<Channel> {
-        accept_one(&self.timesync, ChannelKind::Timesync, &server::timesync_ack())
+        accept_one(
+            &self.timesync,
+            ChannelKind::Timesync,
+            &server::timesync_ack(),
+        )
     }
 }
 
@@ -202,8 +235,8 @@ impl Drop for Listener {
 
 #[cfg(test)]
 mod tests {
+    use super::wire::{Struct, op};
     use super::*;
-    use super::wire::{op, Struct};
 
     /// A client connects to the command socket, runs the reversed handshake,
     /// then a PRP frame round-trips: the server reads it and echoes it back.
@@ -258,7 +291,11 @@ mod tests {
         assert!(String::from_utf8_lossy(&endpoints).contains("prp-internal://"));
 
         // A PRP frame round-trips.
-        let sent = Message::new(7, op::COMMAND_RESPONSE, vec![Struct::new(vec![0, 9]), Struct::new(vec![])]);
+        let sent = Message::new(
+            7,
+            op::COMMAND_RESPONSE,
+            vec![Struct::new(vec![0, 9]), Struct::new(vec![])],
+        );
         c.write_all(&wire::write_frame(&sent)).unwrap();
         let (echoed, _n) = {
             let mut buf = Vec::new();

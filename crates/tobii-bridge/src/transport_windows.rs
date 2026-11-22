@@ -13,19 +13,20 @@ use std::ffi::c_void;
 use std::io::{self, Read, Write};
 use std::ptr::{null, null_mut};
 use windows_sys::Win32::Foundation::{
-    CloseHandle, GetLastError, ERROR_BROKEN_PIPE, ERROR_MORE_DATA, ERROR_NO_DATA, ERROR_PIPE_BUSY,
-    ERROR_PIPE_CONNECTED, ERROR_PIPE_NOT_CONNECTED, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE,
+    CloseHandle, ERROR_BROKEN_PIPE, ERROR_MORE_DATA, ERROR_NO_DATA, ERROR_PIPE_BUSY,
+    ERROR_PIPE_CONNECTED, ERROR_PIPE_NOT_CONNECTED, GENERIC_WRITE, GetLastError, HANDLE,
+    INVALID_HANDLE_VALUE,
 };
 use windows_sys::Win32::Security::Authorization::{
     ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
 };
 use windows_sys::Win32::Security::{PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES};
 use windows_sys::Win32::Storage::FileSystem::{
-    CreateFileW, FlushFileBuffers, ReadFile, WriteFile, OPEN_EXISTING, PIPE_ACCESS_INBOUND,
+    CreateFileW, FlushFileBuffers, OPEN_EXISTING, PIPE_ACCESS_INBOUND, ReadFile, WriteFile,
 };
 use windows_sys::Win32::System::Pipes::{
-    ConnectNamedPipe, CreateNamedPipeW, WaitNamedPipeW, PIPE_READMODE_MESSAGE, PIPE_TYPE_MESSAGE,
-    PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
+    ConnectNamedPipe, CreateNamedPipeW, PIPE_READMODE_MESSAGE, PIPE_TYPE_MESSAGE,
+    PIPE_UNLIMITED_INSTANCES, PIPE_WAIT, WaitNamedPipeW,
 };
 
 /// In-buffer size the clients use for their own pipe.
@@ -113,7 +114,11 @@ impl Listener {
             lpSecurityDescriptor: sd as *mut c_void,
             bInheritHandle: 0,
         };
-        let listener = Listener { name: name.to_string(), path: wide(&format!(r"\\.\pipe\{name}")), attrs };
+        let listener = Listener {
+            name: name.to_string(),
+            path: wide(&format!(r"\\.\pipe\{name}")),
+            attrs,
+        };
         // Fail now rather than at the first client if the name is taken.
         drop(listener.instance()?);
         Ok(listener)
@@ -156,14 +161,24 @@ impl Pending {
     pub fn handshake(mut self) -> io::Result<Conn> {
         let msg = read_message(&mut self.0)?;
         if msg.len() < 5 {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "short handshake"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "short handshake",
+            ));
         }
         let mode = u32::from_le_bytes(msg[0..4].try_into().unwrap());
         let name_bytes = &msg[4..];
-        let end = name_bytes.iter().position(|&b| b == 0).unwrap_or(name_bytes.len());
+        let end = name_bytes
+            .iter()
+            .position(|&b| b == 0)
+            .unwrap_or(name_bytes.len());
         let name = String::from_utf8_lossy(&name_bytes[..end]).into_owned();
         let writer = open_client_pipe(&name)?;
-        Ok(Conn { mode, reader: Box::new(self.0), writer: Box::new(writer) })
+        Ok(Conn {
+            mode,
+            reader: Box::new(self.0),
+            writer: Box::new(writer),
+        })
     }
 }
 
@@ -173,7 +188,15 @@ fn read_message(pipe: &mut Pipe) -> io::Result<Vec<u8>> {
     let mut buf = [0u8; 1024];
     loop {
         let mut n = 0u32;
-        let ok = unsafe { ReadFile(pipe.0, buf.as_mut_ptr(), buf.len() as u32, &mut n, null_mut()) };
+        let ok = unsafe {
+            ReadFile(
+                pipe.0,
+                buf.as_mut_ptr(),
+                buf.len() as u32,
+                &mut n,
+                null_mut(),
+            )
+        };
         msg.extend_from_slice(&buf[..n as usize]);
         if ok != 0 {
             return Ok(msg);
@@ -188,7 +211,17 @@ fn read_message(pipe: &mut Pipe) -> io::Result<Vec<u8>> {
 fn open_client_pipe(name: &str) -> io::Result<Pipe> {
     let path = wide(&format!(r"\\.\pipe\{name}"));
     for _ in 0..4 {
-        let h = unsafe { CreateFileW(path.as_ptr(), GENERIC_WRITE, 0, null(), OPEN_EXISTING, 0, null_mut()) };
+        let h = unsafe {
+            CreateFileW(
+                path.as_ptr(),
+                GENERIC_WRITE,
+                0,
+                null(),
+                OPEN_EXISTING,
+                0,
+                null_mut(),
+            )
+        };
         if h != INVALID_HANDLE_VALUE {
             return Ok(Pipe(h));
         }

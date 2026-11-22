@@ -9,10 +9,10 @@
 //! tracker's verdict is relayed back. The bridge never blanks, forges or
 //! validates a licence itself.
 
-pub mod wire;
+pub mod run;
 pub mod server;
 pub mod translate;
-pub mod run;
+pub mod wire;
 
 #[cfg(windows)]
 #[path = "transport_windows.rs"]

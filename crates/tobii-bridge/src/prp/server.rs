@@ -60,7 +60,10 @@ pub fn parse_client_hello(msg: &[u8]) -> Option<(ChannelKind, String)> {
     }
     let kind = ChannelKind::from_word(u32::from_le_bytes(msg[4..8].try_into().ok()?))?;
     let name_bytes = &msg[8..];
-    let end = name_bytes.iter().position(|&b| b == 0).unwrap_or(name_bytes.len());
+    let end = name_bytes
+        .iter()
+        .position(|&b| b == 0)
+        .unwrap_or(name_bytes.len());
     let name = String::from_utf8(name_bytes[..end].to_vec()).ok()?;
     Some((kind, name))
 }
@@ -124,10 +127,10 @@ pub fn timesync_ack() -> Vec<u8> {
 pub fn internal_endpoints(ack: &[u8]) -> Vec<String> {
     let mut out = Vec::new();
     for part in ack.get(8..).unwrap_or(&[]).split(|&b| b == 0) {
-        if let Ok(s) = std::str::from_utf8(part) {
-            if let Some(rest) = s.strip_prefix(INTERNAL_PREFIX) {
-                out.push(rest.to_string());
-            }
+        if let Ok(s) = std::str::from_utf8(part)
+            && let Some(rest) = s.strip_prefix(INTERNAL_PREFIX)
+        {
+            out.push(rest.to_string());
         }
     }
     out
@@ -143,7 +146,10 @@ mod tests {
     const TS_UUID: &str = "025cbdd0-a05f-4e9d-bdf8-122c78c2452c";
 
     fn hex(s: &str) -> Vec<u8> {
-        (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect()
+        (0..s.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+            .collect()
     }
 
     #[test]
@@ -153,7 +159,10 @@ mod tests {
         let (kind, name) = parse_client_hello(&m).unwrap();
         assert_eq!(kind, ChannelKind::Command);
         assert_eq!(name, "client_TOBIIPRP-CAPTURE_000042bc_00007ff9fc6aec8f");
-        assert_eq!(ChannelKind::from_word(0x4e22), Some(ChannelKind::Subscription));
+        assert_eq!(
+            ChannelKind::from_word(0x4e22),
+            Some(ChannelKind::Subscription)
+        );
         assert_eq!(ChannelKind::from_word(0x4e23), Some(ChannelKind::Timesync));
     }
 

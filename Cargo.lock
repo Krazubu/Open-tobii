@@ -2322,6 +2322,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "ttpbridge"
+version = "0.6.0"
+dependencies = [
+ "anyhow",
+ "libc",
+ "libusb1-sys",
+ "rusb",
+ "tobii-proto",
+ "tobii-usb",
+ "tracing",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
 name = "typenum"
 version = "1.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

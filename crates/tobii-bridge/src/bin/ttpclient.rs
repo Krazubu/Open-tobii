@@ -20,7 +20,9 @@ type Reader = Box<dyn Read + Send>;
 type Writer = Box<dyn Write + Send>;
 
 fn hex(s: &str) -> Vec<u8> {
-    (0..s.len() / 2).map(|i| u8::from_str_radix(&s[2 * i..2 * i + 2], 16).unwrap()).collect()
+    (0..s.len() / 2)
+        .map(|i| u8::from_str_radix(&s[2 * i..2 * i + 2], 16).unwrap())
+        .collect()
 }
 
 fn be(b: &[u8], off: usize) -> u32 {
@@ -56,7 +58,9 @@ fn connect(endpoint: &str, mode: u32) -> std::io::Result<(Reader, Writer)> {
 
 fn main() -> std::io::Result<()> {
     let mut args = std::env::args().skip(1);
-    let endpoint = args.next().expect("usage: ttpclient <socket path | pipe name> [--timesync]");
+    let endpoint = args
+        .next()
+        .expect("usage: ttpclient <socket path | pipe name> [--timesync]");
     let timesync = args.next().as_deref() == Some("--timesync");
 
     if timesync {
@@ -71,10 +75,14 @@ fn main() -> std::io::Result<()> {
             w.write_all(&req)?;
             match rx.recv_timeout(Duration::from_secs(3)) {
                 Ok(rsp) if rsp.len() >= 16 => {
-                    let wd = |i: usize| u32::from_le_bytes(rsp[4 * i..4 * i + 4].try_into().unwrap());
+                    let wd =
+                        |i: usize| u32::from_le_bytes(rsp[4 * i..4 * i + 4].try_into().unwrap());
                     println!(
                         "timesync reply: type {} seq {} device time {}.{:06} s",
-                        wd(0), wd(1), wd(2), wd(3)
+                        wd(0),
+                        wd(1),
+                        wd(2),
+                        wd(3)
                     );
                 }
                 Ok(rsp) => println!("timesync: short reply ({} bytes)", rsp.len()),
@@ -107,12 +115,23 @@ fn main() -> std::io::Result<()> {
             if pending.len() < 24 + len {
                 break;
             }
-            let (marker, seq, status, id, err) =
-                (be(&pending, 0), be(&pending, 4), be(&pending, 8), be(&pending, 12), be(&pending, 16));
+            let (marker, seq, status, id, err) = (
+                be(&pending, 0),
+                be(&pending, 4),
+                be(&pending, 8),
+                be(&pending, 12),
+                be(&pending, 16),
+            );
             let payload = &pending[24..24 + len];
             let text: String = payload
                 .iter()
-                .map(|&b| if (0x20..0x7f).contains(&b) { b as char } else { ' ' })
+                .map(|&b| {
+                    if (0x20..0x7f).contains(&b) {
+                        b as char
+                    } else {
+                        ' '
+                    }
+                })
                 .collect::<String>()
                 .split_whitespace()
                 .filter(|w| w.len() > 2)
@@ -134,10 +153,12 @@ mod win {
     use std::io::{self, Read, Write};
     use std::ptr::{null, null_mut};
     use windows_sys::Win32::Foundation::{
-        CloseHandle, GetLastError, ERROR_BROKEN_PIPE, ERROR_MORE_DATA, ERROR_PIPE_CONNECTED, GENERIC_WRITE,
-        HANDLE, INVALID_HANDLE_VALUE,
+        CloseHandle, ERROR_BROKEN_PIPE, ERROR_MORE_DATA, ERROR_PIPE_CONNECTED, GENERIC_WRITE,
+        GetLastError, HANDLE, INVALID_HANDLE_VALUE,
     };
-    use windows_sys::Win32::Storage::FileSystem::{CreateFileW, ReadFile, WriteFile, OPEN_EXISTING, PIPE_ACCESS_INBOUND};
+    use windows_sys::Win32::Storage::FileSystem::{
+        CreateFileW, OPEN_EXISTING, PIPE_ACCESS_INBOUND, ReadFile, WriteFile,
+    };
     use windows_sys::Win32::System::Pipes::{
         ConnectNamedPipe, CreateNamedPipeW, PIPE_READMODE_MESSAGE, PIPE_TYPE_MESSAGE, PIPE_WAIT,
     };
@@ -153,7 +174,15 @@ mod win {
     impl Read for Pipe {
         fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
             let mut n = 0u32;
-            let ok = unsafe { ReadFile(self.0, buf.as_mut_ptr(), buf.len() as u32, &mut n, null_mut()) };
+            let ok = unsafe {
+                ReadFile(
+                    self.0,
+                    buf.as_mut_ptr(),
+                    buf.len() as u32,
+                    &mut n,
+                    null_mut(),
+                )
+            };
             if ok != 0 {
                 return Ok(n as usize);
             }
@@ -167,7 +196,8 @@ mod win {
     impl Write for Pipe {
         fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
             let mut n = 0u32;
-            if unsafe { WriteFile(self.0, buf.as_ptr(), buf.len() as u32, &mut n, null_mut()) } == 0 {
+            if unsafe { WriteFile(self.0, buf.as_ptr(), buf.len() as u32, &mut n, null_mut()) } == 0
+            {
                 return Err(io::Error::last_os_error());
             }
             Ok(n as usize)
@@ -184,7 +214,9 @@ mod win {
     pub fn connect(server: &str, mode: u32) -> io::Result<(Reader, Writer)> {
         static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let own = format!("client_{server}_{:08x}_{n:016x}", unsafe { GetCurrentProcessId() });
+        let own = format!("client_{server}_{:08x}_{n:016x}", unsafe {
+            GetCurrentProcessId()
+        });
 
         let own_path = wide(&format!(r"\\.\pipe\{own}"));
         let inbound = unsafe {
@@ -205,7 +237,17 @@ mod win {
         let inbound = Pipe(inbound);
 
         let server_path = wide(&format!(r"\\.\pipe\{server}"));
-        let out = unsafe { CreateFileW(server_path.as_ptr(), GENERIC_WRITE, 0, null(), OPEN_EXISTING, 0, null_mut()) };
+        let out = unsafe {
+            CreateFileW(
+                server_path.as_ptr(),
+                GENERIC_WRITE,
+                0,
+                null(),
+                OPEN_EXISTING,
+                0,
+                null_mut(),
+            )
+        };
         if out == INVALID_HANDLE_VALUE {
             return Err(io::Error::last_os_error());
         }
@@ -217,7 +259,9 @@ mod win {
         out.write_all(&hello)?;
 
         // Wait for the server to open our pipe.
-        if unsafe { ConnectNamedPipe(inbound.0, null_mut()) } == 0 && unsafe { GetLastError() } != ERROR_PIPE_CONNECTED {
+        if unsafe { ConnectNamedPipe(inbound.0, null_mut()) } == 0
+            && unsafe { GetLastError() } != ERROR_PIPE_CONNECTED
+        {
             return Err(io::Error::last_os_error());
         }
         Ok((Box::new(inbound), Box::new(out)))
